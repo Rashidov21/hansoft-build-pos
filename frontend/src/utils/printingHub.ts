@@ -132,9 +132,12 @@ export async function printReceiptWithFallback(
   throw new Error(i18n.t('err.PRINTER_RECEIPT_PAYLOAD_EMPTY'))
 }
 
-export type PrintNakladnoyResult = PrintReceiptResult & { public_no: string }
+export type PrintNakladnoyResult =
+  | (PrintReceiptResult & { public_no: string })
+  | { kind: 'print_failed'; public_no: string; error: string; plain_text: string }
 
-/** Print pick-list / nakladnoy from cart lines (no stock change). */
+/** Print pick-list / nakladnoy from cart lines (no stock change).
+ * On printer failure still returns public_no so POS can continue picking (A1). */
 export async function printNakladnoyWithFallback(
   lines: NakladnoyLinePayload[],
   settings: PrinterSettingsLike | null,
@@ -146,16 +149,26 @@ export async function printNakladnoyWithFallback(
     public_no: opts?.public_no,
   })
   const public_no = res.public_no || opts?.public_no || ''
+  const plain = (res.plain_text || '').trim()
   const b64 = (res.raw_base64 ?? res.escpos_base64 ?? '').trim()
   if (b64) {
-    const printer = await dispatchReceipt(b64, settings)
-    return { kind: 'escpos', printer, public_no }
+    try {
+      const printer = await dispatchReceipt(b64, settings)
+      return { kind: 'escpos', printer, public_no }
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err || '')
+      return { kind: 'print_failed', public_no, error, plain_text: plain }
+    }
   }
-  const plain = (res.plain_text || '').trim()
   if (plain) {
-    const { invoke } = await import('@tauri-apps/api/tauri')
-    await invoke('print_plain', { text: plain })
-    return { kind: 'plain', public_no }
+    try {
+      const { invoke } = await import('@tauri-apps/api/tauri')
+      await invoke('print_plain', { text: plain })
+      return { kind: 'plain', public_no }
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err || '')
+      return { kind: 'print_failed', public_no, error, plain_text: plain }
+    }
   }
   throw new Error(i18n.t('err.PRINTER_RECEIPT_PAYLOAD_EMPTY'))
 }

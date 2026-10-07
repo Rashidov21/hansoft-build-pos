@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Clear catalog/sales data and seed honey shop (Asal) demo data.
+"""DEPRECATED: honey shop seed. Use clear_and_seed_build.py instead.
 
+Kept for legacy demos only. Clear catalog/sales data and seed honey (Asal) demo data.
 Prices are per unit: sum/kg for honey (unit=kg), sum/dona for bee products.
-Stock is in the same unit (kg may be fractional, e.g. 12.5).
 """
 import os
 from decimal import Decimal
@@ -179,7 +179,8 @@ if __name__ == "__main__":
     import sys
 
     print("=" * 60)
-    print("Hansoft POS - Clear & Seed Honey Shop Data")
+    print("DEPRECATED: use clear_and_seed_build.py for construction POS")
+    print("Hansoft POS - Clear & Seed Honey Shop Data (legacy)")
     print("=" * 60)
     auto = "--yes" in sys.argv or "-y" in sys.argv
     if not auto:

@@ -688,6 +688,7 @@ export function PosPage({
         receipt_printer_name: receiptPrinterName || '',
         receipt_printer_port: receiptPrinterPort || '',
       }, { public_no: nakladnoyNo || undefined })
+      // Enter picking even if physical print failed (payload already issued, stock untouched).
       setNakladnoyNo(result.public_no || null)
       setSalePhase('picking')
       if (result.kind === 'escpos') {
@@ -699,12 +700,22 @@ export function PosPage({
           }),
           { muteSound: true },
         )
-      } else {
+      } else if (result.kind === 'plain') {
         showToast(
           'ok',
           t('pos.nakladnoyPrintedPlain', { defaultValue: 'Nakladnoy matn sifatida ochildi' }),
           { muteSound: true },
         )
+      } else {
+        const rawMessage = result.error || t('msg.printFailed')
+        const warn =
+          (isPrinterError(rawMessage) ? translatePrinterError(rawMessage) : rawMessage) +
+          ' — ' +
+          t('pos.nakladnoyContinueWithoutPrint', {
+            defaultValue: 'Yig‘ishni davom ettirish mumkin',
+          })
+        setPrintBanner(warn)
+        showToast('err', warn, { muteSound: true })
       }
     } catch (e: unknown) {
       const rawMessage = e instanceof Error ? e.message : String(e || '')
@@ -871,10 +882,10 @@ export function PosPage({
     }
   }
 
-  async function doComplete() {
+  async function doComplete(opts?: { asQuick?: boolean }) {
     if (completing || completeInFlightRef.current || cart.length === 0) return
-    // Full path: pay only after pick confirmation; idle = quick path (no nakladnoy).
-    if (salePhase === 'picking') {
+    // Full path: pay only after pick confirmation; asQuick skips that guard (nakladnoy abandoned on success).
+    if (salePhase === 'picking' && !opts?.asQuick) {
       setBanner(t('pos.pickBeforePay', { defaultValue: 'Avval yig‘ishni tekshiring yoki tezkor yo‘lni tanlang' }))
       showToast('err', t('pos.pickBeforePay', { defaultValue: 'Avval yig‘ishni tekshiring' }))
       return
@@ -2191,15 +2202,23 @@ export function PosPage({
 
             <button
               type="button"
-              disabled={completing || cart.length === 0 || salePhase === 'picking'}
-              className="touch-btn w-full min-h-kiosk-touch pos-lg:min-h-14 py-2.5 pos-lg:py-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 font-semibold text-kiosk pos-lg:text-lg"
-              onClick={() => void doComplete()}
+              disabled={completing || cart.length === 0}
+              className={`touch-btn w-full min-h-kiosk-touch pos-lg:min-h-14 py-2.5 pos-lg:py-4 rounded-xl disabled:opacity-40 font-semibold text-kiosk pos-lg:text-lg ${
+                salePhase === 'picking'
+                  ? 'bg-slate-700 hover:bg-slate-600 border border-slate-500'
+                  : 'bg-emerald-600 hover:bg-emerald-500'
+              }`}
+              onClick={() =>
+                void doComplete(salePhase === 'picking' ? { asQuick: true } : undefined)
+              }
             >
               {completing
                 ? t('summary.saving')
-                : salePhase === 'idle'
-                  ? t('pos.quickPay', { defaultValue: 'Tezkor to‘lov' })
-                  : t('summary.completeTouch')}
+                : salePhase === 'picking'
+                  ? t('pos.switchToQuickPay', { defaultValue: 'Tezkor to‘lovga (nakladnoysiz)' })
+                  : salePhase === 'idle'
+                    ? t('pos.quickPay', { defaultValue: 'Tezkor to‘lov' })
+                    : t('summary.completeTouch')}
             </button>
           </div>
         </aside>

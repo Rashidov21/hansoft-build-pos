@@ -131,7 +131,7 @@ def build_return_eligible_lines(sale: Sale, all_lines: list[SaleLine] | None = N
                 "category_name_uz": getattr(cat, "name_uz", "") if cat else "",
                 "category_name_ru": getattr(cat, "name_ru", "") if cat else "",
                 "color": getattr(v, "color", "") or "",
-                "unit": getattr(v, "unit", "kg") or "kg",
+                "unit": getattr(v, "unit", None) or "dona",
                 "sold_qty": str(sq),
                 "returned_qty": str(rq),
                 "remaining_qty": str(rem),

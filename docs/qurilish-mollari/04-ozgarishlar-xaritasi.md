@@ -47,11 +47,11 @@ Bosqichlar: [06-bosqichlar.md](./06-bosqichlar.md).
 
 | Fayl | O‘zgarish |
 |------|-----------|
-| `clear_and_seed_build.py` | yangi |
+| `clear_and_seed_build.py` | qurilish demo katalog (dona/kg/m/qop + ulgurji) |
 | `clear_and_seed_honey.py` | deprecated |
 | `README.md` | qurilish POS |
-| locales / BootScreen | honey matnlarni tozalash |
-| Suppliers/Returns matn | S5–S7 atamalar |
+| locales | asal/honey ko‘rinadigan matnlar tozalandi |
+| Suppliers/Returns | postavshik / qaytarish atamalari |
 
 ## Bosqich 6 — Multi-kassa
 

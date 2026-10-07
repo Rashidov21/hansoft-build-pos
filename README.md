@@ -1,17 +1,18 @@
-# Hansoft POS — Honey Shop
+# Hansoft POS — Qurilish mollari
 
-**Hansoft POS** — asal va ari mahsulotlari do‘koni uchun offline-first savdo tizimi (Django + React + Tauri).
+**Hansoft POS** — qurilish mollari va umumiy chakana do‘konlar uchun offline-first savdo tizimi (Django + React + Tauri).
 
-Avval telefon/aksessuar POS edi; endi og‘irlik (kg) asosida ishlaydi.
+Daftar o‘rniga: mahsulot, ombor, savdo (to‘liq/tezkor), nasiya, smena, nakladnoy + chek (XP-80C).
 
 ## Asosiy model
 
-- Asal: kategoriya → nav (bitta qoldiq, narx **so‘m/kg**)
-- Savdo: tarozidan keyin qo‘lda kg yoki gramm (min **100 g**)
-- Ari mahsulotlari: `dona` birligi
-- Barcode/stiker chop etish yo‘q — POS da nom bo‘yicha qidiruv
-- Nasiya, chegirma (summa), smena, yetkazib beruvchi, chek — saqlanadi
-- IMEI / sherik telefon / GB — UI dan olib tashlangan
+- Birliklar: `dona` / `kg` / `m` / `qop` (konversiyasiz)
+- Narx: chakana majburiy, ulgurji ixtiyoriy (kassir tanlaydi)
+- Savdo yo‘llari: **to‘liq** (nakladnoy → yig‘ish → to‘lov) yoki **tezkor** (nakladnoysiz)
+- Nakladnoy **A1**: chopda qoldiq o‘zgarmaydi; kamayish faqat to‘lovda
+- Naqd **qaytim**: Berilgan → Qaytim
+- Nasiya, smena, yetkazib beruvchi, qaytarish, Telegram/WhatsApp — saqlanadi
+- Barcode ixtiyoriy; tarozi integratsiyasi yo‘q
 
 ## Stack
 
@@ -29,7 +30,7 @@ python -m venv .venv
 # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 python manage.py migrate
-python clear_and_seed_honey.py   # demo asal katalog
+python clear_and_seed_build.py   # demo qurilish katalog
 python manage.py runserver 0.0.0.0:8000
 ```
 
@@ -47,7 +48,12 @@ Demo login: `owner` / `admin` / `cashier` — PIN `1111` (seed dan).
 
 ```bash
 cd backend
-python clear_and_seed_honey.py
+python clear_and_seed_build.py
+# yoki: python clear_and_seed_build.py --yes
 ```
 
-Batafsil moslash rejasi: [ASAL_DOKONI_OZGARISHLAR.md](ASAL_DOKONI_OZGARISHLAR.md)
+Eski asal demo: `clear_and_seed_honey.py` — **deprecated**, yangi o‘rnatishlarda ishlatilmasin.
+
+## Hujjatlar
+
+- Qurilish moslash / S1–S8: [docs/qurilish-mollari/](docs/qurilish-mollari/README.md)

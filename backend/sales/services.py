@@ -133,7 +133,7 @@ def _complete_sale_inner(
         if not v:
             raise ValueError(f"Variant not found or inactive: {vid}")
 
-        validate_sale_qty(qty, getattr(v, "unit", "kg") or "kg")
+        validate_sale_qty(qty, getattr(v, "unit", None) or "dona")
 
         if is_bonus:
             list_price = Decimal("0")
@@ -482,7 +482,7 @@ def return_sale_lines(
         if qty > remaining:
             raise ValueError(f"Return qty exceeds remaining sold qty for variant: {variant_id}")
         variant = ProductVariant.objects.get(pk=variant_id)
-        validate_sale_qty(qty, getattr(variant, "unit", "kg") or "kg")
+        validate_sale_qty(qty, getattr(variant, "unit", None) or "dona")
         apply_movement(
             variant=variant,
             qty_delta=qty,

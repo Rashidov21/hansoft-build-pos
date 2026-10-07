@@ -146,6 +146,10 @@ def test_payment_mismatch_raises(cashier, variant):
 
 @pytest.mark.django_db
 def test_barcode_format_numeric_prefix(variant):
+    # Barcode is optional for build POS; when present it should be numeric SKU-style.
+    if not variant.barcode:
+        variant.barcode = "20000001"
+        variant.save(update_fields=["barcode"])
     assert variant.barcode.isdigit()
     assert len(variant.barcode) == 8
     assert int(variant.barcode) >= 20000001

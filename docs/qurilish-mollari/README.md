@@ -2,7 +2,7 @@
 
 Bu papka **umumiy** Hansoft POS mahsulotini qurilish mollari do‘konlariga moslash uchun **yalagiz manba** (tasdiqlangan qarorlar).
 
-Kod hozir hali asal/ari (honey) modelida. Implementatsiya: reja bosqichlari `build_pos_moslash` — **Bosqich 0 = shu hujjatlar**.
+Implementatsiya: reja bosqichlari `build_pos_moslash`. Demo seed: `backend/clear_and_seed_build.py`.
 
 ## Tasdiqlangan sharoit
 
