@@ -3,7 +3,14 @@ import { useTranslation } from 'react-i18next'
 import { MoreVertical, PackagePlus, Pencil, Power, Trash2, Tags, RotateCcw, Plus } from 'lucide-react'
 import type { BulkGridCell, Category, Product, ProductCategory, StoreSettings, Variant } from '../api'
 import { formatMoney } from '../utils/money'
-import { formatQty, parseQty, type ProductUnit } from '../utils/qty'
+import {
+  formatQty,
+  isIntegerUnit,
+  normalizeUnit,
+  parseQty,
+  PRODUCT_UNITS,
+  type ProductUnit,
+} from '../utils/qty'
 import { ActionToast } from '../components/ActionToast'
 import { ConfirmModal } from '../components/ConfirmModal'
 
@@ -22,15 +29,17 @@ type CreateForm = {
   unit: ProductUnit
   purchase: string
   list: string
+  wholesale: string
   qty: string
 }
 
 const EMPTY_FORM: CreateForm = {
   productCategory: '',
   name: '',
-  unit: 'kg',
+  unit: 'dona',
   purchase: '',
   list: '',
+  wholesale: '',
   qty: '',
 }
 
@@ -39,7 +48,7 @@ function digitsOnly(v: string): string {
 }
 
 function variantUnit(v: Pick<Variant, 'unit'>): ProductUnit {
-  return v.unit === 'dona' ? 'dona' : 'kg'
+  return normalizeUnit(v.unit)
 }
 
 export function CatalogPage({
@@ -102,7 +111,12 @@ export function CatalogPage({
   onToggleVariant: (v: Variant) => Promise<void>
   onUpdateVariant: (
     v: Variant,
-    patch: { purchase_price: string; list_price: string; unit?: ProductUnit },
+    patch: {
+      purchase_price: string
+      list_price: string
+      wholesale_price?: string | null
+      unit?: ProductUnit
+    },
   ) => Promise<void>
   onFilter: (q: string) => void
   onPage: (page: number) => void
@@ -130,6 +144,7 @@ export function CatalogPage({
   const [editUnit, setEditUnit] = useState<ProductUnit>('kg')
   const [editPurchase, setEditPurchase] = useState('')
   const [editList, setEditList] = useState('')
+  const [editWholesale, setEditWholesale] = useState('')
 
   const [quickAdjust, setQuickAdjust] = useState<Variant | null>(null)
   const [quickMode, setQuickMode] = useState<'add' | 'sub'>('add')
@@ -189,7 +204,7 @@ export function CatalogPage({
   function validateStockInput(raw: string, unit: ProductUnit): number | null {
     const qty = parseQty(raw || '0')
     if (qty < 0) return null
-    if (unit === 'dona' && !Number.isInteger(qty)) {
+    if (isIntegerUnit(unit) && !Number.isInteger(qty)) {
       err(t('admin.catalog.honey.donaWhole'))
       return null
     }
@@ -238,6 +253,7 @@ export function CatalogPage({
     const qty = validateStockInput(form.qty, form.unit)
     if (qty === null) return
     const list = digitsOnly(form.list)
+    const wholesale = digitsOnly(form.wholesale)
 
     setBusy(true)
     try {
@@ -254,6 +270,7 @@ export function CatalogPage({
           {
             purchase_price: purchase,
             list_price: list || undefined,
+            wholesale_price: wholesale || undefined,
             initial_qty: qty,
             unit: form.unit,
           },
@@ -275,6 +292,7 @@ export function CatalogPage({
     setEditUnit(variantUnit(v))
     setEditPurchase(String(Math.round(Number(v.purchase_price || 0))))
     setEditList(v.list_price ? String(Math.round(Number(v.list_price))) : '')
+    setEditWholesale(v.wholesale_price ? String(Math.round(Number(v.wholesale_price))) : '')
   }
 
   async function saveEdit() {
@@ -289,10 +307,11 @@ export function CatalogPage({
       err(t('admin.catalog.wizard.purchasePriceRequired'))
       return
     }
-    if (editUnit === 'dona' && !Number.isInteger(Number(editing.stock_qty ?? 0))) {
+    if (isIntegerUnit(editUnit) && !Number.isInteger(Number(editing.stock_qty ?? 0))) {
       err(t('admin.catalog.honey.donaWhole'))
       return
     }
+    const wholesale = digitsOnly(editWholesale)
     setBusy(true)
     try {
       await onUpdateProduct(editing.product, {
@@ -303,6 +322,7 @@ export function CatalogPage({
       await onUpdateVariant(editing, {
         purchase_price: purchase,
         list_price: digitsOnly(editList),
+        wholesale_price: wholesale || null,
         unit: editUnit,
       })
       ok(t('admin.catalog.honey.saved'))
@@ -429,8 +449,9 @@ export function CatalogPage({
     return 'border-l-[3px] border-transparent'
   }
 
-  const formUnitHint =
-    form.unit === 'kg' ? t('admin.catalog.honey.priceHintKg') : t('admin.catalog.honey.priceHintDona')
+  const formUnitHint = t(`admin.catalog.priceHint.${form.unit}`, {
+    defaultValue: t('admin.catalog.honey.priceHintDona'),
+  })
 
   return (
     <div className="p-3 pos-lg:p-4 space-y-3 pos-lg:space-y-4">
@@ -542,8 +563,8 @@ export function CatalogPage({
 
             <div className="space-y-1">
               <span className="text-xs text-slate-400">{t('admin.catalog.honey.unit')}</span>
-              <div className="flex gap-2">
-                {(['kg', 'dona'] as const).map((u) => (
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {PRODUCT_UNITS.map((u) => (
                   <button
                     key={u}
                     type="button"
@@ -558,7 +579,11 @@ export function CatalogPage({
                   </button>
                 ))}
               </div>
-              <p className="text-xs text-slate-500">{t('admin.catalog.honey.minKgHint')}</p>
+              <p className="text-xs text-slate-500">
+                {t('admin.catalog.unitHint', {
+                  defaultValue: 'dona/qop — butun son; kg/m — kasr mumkin (masalan 0,5).',
+                })}
+              </p>
             </div>
 
             <label className="space-y-1 block">
@@ -568,7 +593,7 @@ export function CatalogPage({
               <input
                 className={INPUT_CLS}
                 inputMode="decimal"
-                placeholder={form.unit === 'kg' ? '12.5' : '10'}
+                placeholder={isIntegerUnit(form.unit) ? '10' : '12.5'}
                 value={form.qty}
                 onChange={(e) => setForm({ ...form, qty: e.target.value.replace(',', '.') })}
               />
@@ -597,6 +622,22 @@ export function CatalogPage({
                 placeholder={t('admin.catalog.listPricePlaceholder')}
                 value={form.list}
                 onChange={(e) => setForm({ ...form, list: digitsOnly(e.target.value) })}
+              />
+            </label>
+
+            <label className="space-y-1 block">
+              <span className="text-xs text-slate-400">
+                {t('admin.catalog.wholesalePrice', { defaultValue: 'Ulgurji narx (ixtiyoriy)' })} —{' '}
+                {formUnitHint}
+              </span>
+              <input
+                className={INPUT_CLS}
+                inputMode="numeric"
+                placeholder={t('admin.catalog.wholesalePricePlaceholder', {
+                  defaultValue: 'Bo‘sh qoldirish mumkin',
+                })}
+                value={form.wholesale}
+                onChange={(e) => setForm({ ...form, wholesale: digitsOnly(e.target.value) })}
               />
             </label>
           </div>
@@ -805,8 +846,8 @@ export function CatalogPage({
             </label>
             <div className="space-y-1">
               <span className="text-xs text-slate-400">{t('admin.catalog.honey.unit')}</span>
-              <div className="flex gap-2">
-                {(['kg', 'dona'] as const).map((u) => (
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {PRODUCT_UNITS.map((u) => (
                   <button
                     key={u}
                     type="button"
@@ -839,6 +880,20 @@ export function CatalogPage({
                   inputMode="numeric"
                   value={editList}
                   onChange={(e) => setEditList(digitsOnly(e.target.value))}
+                />
+              </label>
+              <label className="space-y-1 block col-span-2">
+                <span className="text-xs text-slate-400">
+                  {t('admin.catalog.wholesalePrice', { defaultValue: 'Ulgurji narx (ixtiyoriy)' })}
+                </span>
+                <input
+                  className={INPUT_CLS}
+                  inputMode="numeric"
+                  value={editWholesale}
+                  onChange={(e) => setEditWholesale(digitsOnly(e.target.value))}
+                  placeholder={t('admin.catalog.wholesalePricePlaceholder', {
+                    defaultValue: 'Bo‘sh qoldirish mumkin',
+                  })}
                 />
               </label>
             </div>

@@ -28,9 +28,36 @@ import {
 } from '../utils/localizedName'
 import { isPrinterError, translatePrinterError } from '../utils/printerErrors'
 import { buildCompleteSaleFingerprintInput } from '../utils/saleFingerprint'
-import { printReceiptWithFallback } from '../utils/printingHub'
+import { printNakladnoyWithFallback, printReceiptWithFallback } from '../utils/printingHub'
 import { requestAdminDataRefresh } from '../utils/adminDataRefresh'
-import { formatQty, parseQty, toKg, validateSaleQty, type ProductUnit } from '../utils/qty'
+import {
+  defaultSaleQty,
+  formatQty,
+  isIntegerUnit,
+  normalizeUnit,
+  parseQty,
+  qtyStep,
+  toKg,
+  validateSaleQty,
+  type ProductUnit,
+} from '../utils/qty'
+import type { PriceTier } from '../store/posStore'
+import { calcCashChange } from '../utils/cashChange'
+
+function hasWholesalePrice(v: { wholesale_price?: string | null }): boolean {
+  const w = v.wholesale_price
+  return w != null && String(w).trim() !== '' && Number(w) > 0
+}
+
+function resolveSellPrice(
+  v: { list_price?: string | null; wholesale_price?: string | null },
+  tier: PriceTier,
+): string | null {
+  if (tier === 'wholesale' && hasWholesalePrice(v)) {
+    return String(v.wholesale_price)
+  }
+  return v.list_price != null ? String(v.list_price) : null
+}
 import { TouchNumpad } from '../components/TouchNumpad'
 import { PinNumpadPanel } from '../components/PinNumpadPanel'
 import { ActionToast } from '../components/ActionToast'
@@ -38,6 +65,9 @@ import { AppearanceDropdown } from '../components/AppearanceDropdown'
 import { loadLocale } from '../i18n'
 
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP })
+
+/** idle = savat; picking = nakladnoy chop / yig‘ish; ready = to‘lovga tayyor (to‘liq yo‘l). */
+type SalePhase = 'idle' | 'picking' | 'ready'
 
 type PaymentRow = {
   id: string
@@ -170,6 +200,9 @@ export function PosPage({
   const [printBanner, setPrintBanner] = useState<string | null>(null)
   const [lastSaleId, setLastSaleId] = useState<string | null>(null)
   const [clearArmed, setClearArmed] = useState(false)
+  const [salePhase, setSalePhase] = useState<SalePhase>('idle')
+  const [nakladnoyNo, setNakladnoyNo] = useState<string | null>(null)
+  const [nakladnoyBusy, setNakladnoyBusy] = useState(false)
   const [orderDiscount, setOrderDiscount] = useState('0')
   const [debtDueDate, setDebtDueDate] = useState('')
   const [debtInstallmentMonths, setDebtInstallmentMonths] = useState('1')
@@ -230,8 +263,10 @@ export function PosPage({
   const setPayMode = usePosStore((s) => s.setPayMode)
   const setCustomer = usePosStore((s) => s.setCustomer)
   const updateLinePrice = usePosStore((s) => s.updateLinePrice)
+  const setLinePriceTier = usePosStore((s) => s.setLinePriceTier)
   const updateLineStock = usePosStore((s) => s.updateLineStock)
   const toggleLineBonus = usePosStore((s) => s.toggleLineBonus)
+  const [priceMode, setPriceMode] = useState<PriceTier>('retail')
   const suspendedCarts = usePosStore((s) => s.suspendedCarts)
   const holdCart = usePosStore((s) => s.holdCart)
   const resumeCart = usePosStore((s) => s.resumeCart)
@@ -521,10 +556,27 @@ export function PosPage({
         .reduce((acc, r) => acc.plus(parseSom(r.amount)), new Decimal(0)),
     [paymentRows],
   )
-  const cashChangeDue = useMemo(
-    () => (cashRowsTotal.gt(grandDec) ? cashRowsTotal.minus(grandDec) : new Decimal(0)),
-    [cashRowsTotal, grandDec],
+  const nonCashRowsTotal = useMemo(
+    () =>
+      paymentRows
+        .filter((r) => r.method !== 'CASH')
+        .reduce((acc, r) => acc.plus(parseSom(r.amount)), new Decimal(0)),
+    [paymentRows],
   )
+  const cashChange = useMemo(() => {
+    const r = calcCashChange({
+      grand: Number(grandDec.toString()),
+      cashTendered: Number(cashRowsTotal.toString()),
+      nonCashPaid: Number(nonCashRowsTotal.toString()),
+    })
+    return {
+      cashOwed: new Decimal(r.cashOwed),
+      change: new Decimal(r.change),
+      shortfall: new Decimal(r.shortfall),
+    }
+  }, [grandDec, cashRowsTotal, nonCashRowsTotal])
+  const cashChangeDue = cashChange.change
+  const showCashTenderPanel = cashRowsTotal.gt(0) || cashChange.cashOwed.gt(0)
 
   function setActiveMethod(method: PayMode) {
     setPayMode(method)
@@ -579,10 +631,99 @@ export function PosPage({
     setCustomer('', '')
   }
 
+  function resetSalePhase() {
+    setSalePhase('idle')
+    setNakladnoyNo(null)
+    setNakladnoyBusy(false)
+  }
+
   function openNewCart(toastMsg?: string) {
     clearCart()
     resetCheckoutState()
+    resetSalePhase()
     if (toastMsg) showToast('ok', toastMsg)
+    safeRefocus()
+  }
+
+  function cancelSaleFlow(opts?: { force?: boolean }) {
+    if (cart.length === 0 && salePhase === 'idle') return
+    // Idle: double-confirm (same as Escape). Picking/ready (S4): immediate.
+    const immediate = opts?.force || salePhase === 'picking' || salePhase === 'ready'
+    if (!immediate && !clearArmed) {
+      setClearArmed(true)
+      setBanner(t('msg.clearCartConfirm'))
+      return
+    }
+    clearCart()
+    resetCheckoutState()
+    resetSalePhase()
+    setClearArmed(false)
+    setBanner(null)
+    showToast('ok', t('pos.saleCancelled', { defaultValue: 'Savdo bekor qilindi (ombor o‘zgarmadi)' }))
+    safeRefocus()
+  }
+
+  function cartLinesForNakladnoy() {
+    return cart.map((l) => {
+      const unit = normalizeUnit(l.unit)
+      const qty = l.qty
+      const unitPrice = l.isBonus ? '0' : parseSom(l.listPrice).toString()
+      const lineTotal = l.isBonus ? '0' : moneyFromLine(l.listPrice, qty)
+      return {
+        name: l.name,
+        qty: formatQty(qty, unit),
+        unit,
+        unit_price: unitPrice,
+        line_total: lineTotal,
+      }
+    })
+  }
+
+  async function printNakladnoy() {
+    if (nakladnoyBusy || cart.length === 0) return
+    setNakladnoyBusy(true)
+    setPrintBanner(null)
+    try {
+      const result = await printNakladnoyWithFallback(cartLinesForNakladnoy(), {
+        receipt_printer_name: receiptPrinterName || '',
+        receipt_printer_port: receiptPrinterPort || '',
+      }, { public_no: nakladnoyNo || undefined })
+      setNakladnoyNo(result.public_no || null)
+      setSalePhase('picking')
+      if (result.kind === 'escpos') {
+        showToast(
+          'ok',
+          t('pos.nakladnoyPrinted', {
+            defaultValue: 'Nakladnoy chop etildi: {{printer}}',
+            printer: result.printer,
+          }),
+          { muteSound: true },
+        )
+      } else {
+        showToast(
+          'ok',
+          t('pos.nakladnoyPrintedPlain', { defaultValue: 'Nakladnoy matn sifatida ochildi' }),
+          { muteSound: true },
+        )
+      }
+    } catch (e: unknown) {
+      const rawMessage = e instanceof Error ? e.message : String(e || '')
+      if (isPrinterError(rawMessage)) {
+        setPrintBanner(translatePrinterError(rawMessage))
+      } else {
+        setPrintBanner(t('msg.printFailed'))
+      }
+      showToast('err', rawMessage || t('msg.printFailed'), { muteSound: true })
+    } finally {
+      setNakladnoyBusy(false)
+      safeRefocus()
+    }
+  }
+
+  function confirmPicked() {
+    if (salePhase !== 'picking') return
+    setSalePhase('ready')
+    showToast('ok', t('pos.pickChecked', { defaultValue: 'Tekshirildi — to‘lovga o‘ting' }))
     safeRefocus()
   }
 
@@ -598,6 +739,7 @@ export function PosPage({
     setCart(session.items)
     refreshCartNames(i18n.language)
     resetCheckoutState()
+    resetSalePhase()
     setPaymentRows([{ id: crypto.randomUUID(), method: 'CASH', amount: String(session.total || 0) }])
     setActivePayId(null)
     showToast('ok', t('pos.cartResumed'))
@@ -646,13 +788,19 @@ export function PosPage({
   ) {
     const nameFields = cartNameFieldsFromVariant(v)
     const displayName = formatPosCartLineName(nameFields, i18n.language)
-    const unit: ProductUnit = v.unit === 'dona' ? 'dona' : 'kg'
+    const unit: ProductUnit = normalizeUnit(v.unit)
+    const retail = v.list_price != null ? String(v.list_price) : '0'
+    const wholesale = hasWholesalePrice(v) ? String(v.wholesale_price) : null
+    const tier: PriceTier =
+      opts?.unitPrice != null
+        ? 'retail'
+        : priceMode === 'wholesale' && wholesale
+          ? 'wholesale'
+          : 'retail'
     const listPrice =
       opts?.unitPrice != null
         ? opts.unitPrice
-        : v.list_price != null
-          ? String(v.list_price)
-          : '0'
+        : resolveSellPrice(v, tier) ?? retail
     addLine({
       variantId: v.id,
       productId: v.product,
@@ -660,11 +808,14 @@ export function PosPage({
       name: displayName,
       nameFields,
       listPrice,
+      retailPrice: retail,
+      wholesalePrice: wholesale,
+      priceTier: tier,
       ...(showPurchasePrice && posVariantPurchasePrice(v)
         ? { purchasePrice: posVariantPurchasePrice(v) }
         : {}),
       stockQty: Number(v.stock_qty || 0),
-      qty: unit === 'dona' ? 1 : 0.1,
+      qty: defaultSaleQty(unit),
       unit,
     })
     beepOk()
@@ -722,6 +873,12 @@ export function PosPage({
 
   async function doComplete() {
     if (completing || completeInFlightRef.current || cart.length === 0) return
+    // Full path: pay only after pick confirmation; idle = quick path (no nakladnoy).
+    if (salePhase === 'picking') {
+      setBanner(t('pos.pickBeforePay', { defaultValue: 'Avval yig‘ishni tekshiring yoki tezkor yo‘lni tanlang' }))
+      showToast('err', t('pos.pickBeforePay', { defaultValue: 'Avval yig‘ishni tekshiring' }))
+      return
+    }
     if (scanFieldPending()) {
       safeRefocus()
       return
@@ -761,6 +918,28 @@ export function PosPage({
       return
     }
 
+    const cashTenderedNow = pays
+      .filter((p) => p.method === 'CASH')
+      .reduce((acc, p) => acc.plus(p.amount), new Decimal(0))
+    const nonCashNow = pays
+      .filter((p) => p.method !== 'CASH')
+      .reduce((acc, p) => acc.plus(p.amount), new Decimal(0))
+    const changeInfo = calcCashChange({
+      grand: Number(grandDec.toString()),
+      cashTendered: Number(cashTenderedNow.toString()),
+      nonCashPaid: Number(nonCashNow.toString()),
+    })
+    if (changeInfo.shortfall > 0 && cashTenderedNow.gt(0)) {
+      beepError()
+      setBanner(
+        t('pay.tenderedShort', {
+          defaultValue: 'Berilgan naqd yetarli emas. Qaytim uchun to‘liq summani kiriting.',
+        }),
+      )
+      safeRefocus()
+      return
+    }
+
     const hasDebt = pays.some((p) => p.method === 'DEBT' && p.amount.gt(0))
     if (hasDebt && (!customerPhone.trim() || !customerName.trim())) {
       beepError()
@@ -770,11 +949,17 @@ export function PosPage({
     }
 
     for (const l of cart) {
-      const unit: ProductUnit = l.unit === 'dona' ? 'dona' : 'kg'
+      const unit: ProductUnit = normalizeUnit(l.unit)
       const bad = validateSaleQty(l.qty, unit)
-      if (bad === 'min_kg') {
+      if (bad === 'min_dona') {
         beepError()
-        setBanner(t('qty.minKg', { defaultValue: 'Minimal savdo: 100 g (0.1 kg)' }))
+        setBanner(t('qty.minInteger', { defaultValue: 'Miqdor butun son bo‘lishi kerak (≥ 1)' }))
+        safeRefocus()
+        return
+      }
+      if (bad === 'min_frac' || bad === 'min_kg') {
+        beepError()
+        setBanner(t('qty.minFrac', { defaultValue: 'Minimal miqdor: 0,001' }))
         safeRefocus()
         return
       }
@@ -930,14 +1115,8 @@ export function PosPage({
     }
     if (e.key === 'Escape') {
       e.preventDefault()
-      if (cart.length > 0) {
-        if (e.shiftKey || clearArmed) {
-          clearCart()
-          setClearArmed(false)
-        } else {
-          setClearArmed(true)
-          setBanner(t('msg.clearCartConfirm'))
-        }
+      if (cart.length > 0 || salePhase !== 'idle') {
+        cancelSaleFlow({ force: e.shiftKey })
       }
       setBuffer('')
       safeRefocus()
@@ -984,14 +1163,8 @@ export function PosPage({
         return
       }
       if (e.key === 'Escape') {
-        if (cart.length > 0) {
-          if (e.shiftKey || clearArmed) {
-            clearCart()
-            setClearArmed(false)
-          } else {
-            setClearArmed(true)
-            setBanner(t('msg.clearCartConfirm'))
-          }
+        if (cart.length > 0 || salePhase !== 'idle') {
+          cancelSaleFlow({ force: e.shiftKey })
         }
         setBuffer('')
         safeRefocus()
@@ -1011,6 +1184,7 @@ export function PosPage({
     locked,
     numpadCtx,
     safeRefocus,
+    salePhase,
     scannerPrefix,
     scannerSuffix,
     selectedLine,
@@ -1065,8 +1239,8 @@ export function PosPage({
       const line = cart.find(
         (c) => c.variantId === ctx.variantId && Boolean(c.isBonus) === Boolean(ctx.isBonus),
       )
-      const unit: ProductUnit = line?.unit === 'dona' ? 'dona' : 'kg'
-      setQtyInputUnit(unit === 'dona' ? 'kg' : 'kg')
+      const unit: ProductUnit = normalizeUnit(line?.unit)
+      setQtyInputUnit('kg')
       const buf = formatQty(Math.max(0, line?.qty ?? 0), unit)
       setNumpadBuf(buf)
       setAmountNumpadBaseline(buf)
@@ -1086,17 +1260,21 @@ export function PosPage({
           c.variantId === numpadCtx.variantId &&
           Boolean(c.isBonus) === Boolean(numpadCtx.isBonus),
       )
-      const unit: ProductUnit = line?.unit === 'dona' ? 'dona' : 'kg'
+      const unit: ProductUnit = normalizeUnit(line?.unit)
       let n = parseQty(numpadBuf || '0')
       if (unit === 'kg' && qtyInputUnit === 'g') {
         n = toKg(n, 'g')
       }
-      if (unit === 'dona') {
+      if (isIntegerUnit(unit)) {
         n = Math.max(0, Math.round(n))
       }
       const bad = validateSaleQty(n, unit)
-      if (bad === 'min_kg') {
-        showToast('err', t('qty.minKg', { defaultValue: 'Minimal savdo: 100 g (0.1 kg)' }))
+      if (bad === 'min_dona') {
+        showToast('err', t('qty.minInteger', { defaultValue: 'Miqdor butun son bo‘lishi kerak (≥ 1)' }))
+        return
+      }
+      if (bad === 'min_frac' || bad === 'min_kg') {
+        showToast('err', t('qty.minFrac', { defaultValue: 'Minimal miqdor: 0,001' }))
         return
       }
       if (n <= 0) {
@@ -1169,12 +1347,39 @@ export function PosPage({
       </header>
 
       <section className="pos-queue-strip mx-2 pos-sm:mx-3 pos-lg:mx-4 mt-1 pos-lg:mt-3 rounded-lg pos-lg:rounded-xl border border-slate-800 bg-slate-900/70 px-2 py-1.5 pos-lg:p-3 max-h-[min(5.5rem,14dvh)] pos-lg:max-h-[min(9rem,22dvh)] min-h-0 flex flex-col shrink-0">
-        <div className="flex items-center justify-between gap-2 shrink-0">
+        <div className="flex items-center justify-between gap-2 shrink-0 flex-wrap">
           <div className="inline-flex items-center gap-1.5 text-xs pos-lg:text-sm text-slate-300 truncate">
             <Users className="h-3.5 w-3.5 pos-lg:h-4 pos-lg:w-4 shrink-0" />
             <span className="truncate">
               {t('pos.activeSessions', { defaultValue: 'Faol navbatlar' })}: {suspendedCarts.length}
             </span>
+          </div>
+          <div className="inline-flex rounded-xl border border-slate-600 overflow-hidden shrink-0">
+            <button
+              type="button"
+              className={`touch-btn min-h-9 px-3 text-xs font-semibold ${
+                priceMode === 'retail'
+                  ? 'bg-emerald-700 text-white'
+                  : 'bg-slate-800 text-slate-300'
+              }`}
+              onClick={() => setPriceMode('retail')}
+            >
+              {t('pos.priceRetail', { defaultValue: 'Chakana' })}
+            </button>
+            <button
+              type="button"
+              className={`touch-btn min-h-9 px-3 text-xs font-semibold ${
+                priceMode === 'wholesale'
+                  ? 'bg-amber-700 text-white'
+                  : 'bg-slate-800 text-slate-300'
+              }`}
+              onClick={() => setPriceMode('wholesale')}
+              title={t('pos.priceWholesaleHint', {
+                defaultValue: 'Faqat ulgurji narxi bor tovarlarga qo‘llanadi',
+              })}
+            >
+              {t('pos.priceWholesale', { defaultValue: 'Ulgurji' })}
+            </button>
           </div>
           <button
             type="button"
@@ -1305,7 +1510,7 @@ export function PosPage({
             >
               {searchResults.map((v) => {
                 const customName = pickCustomName(v, i18n.language)
-                const unit = v.unit === 'dona' ? 'dona' : 'kg'
+                const unit = normalizeUnit(v.unit)
                 return (
                 <li key={v.id}>
                   <button
@@ -1396,11 +1601,46 @@ export function PosPage({
                         ) : null}
                       </div>
                       <div className="text-xs text-slate-400">
-                        {l.unit === 'dona'
-                          ? t('unit.dona', { defaultValue: 'dona' })
-                          : `${t('unit.kg', { defaultValue: 'kg' })} · ${formatMoney(l.listPrice)}/${t('unit.kg', { defaultValue: 'kg' })}`}
+                        {`${t(`unit.${normalizeUnit(l.unit)}`, { defaultValue: normalizeUnit(l.unit) })} · ${formatMoney(l.listPrice)}/${t(`unit.${normalizeUnit(l.unit)}`, { defaultValue: normalizeUnit(l.unit) })}`}
+                        {l.priceTier === 'wholesale' ? (
+                          <span className="ml-2 text-amber-400">
+                            ({t('pos.priceWholesale', { defaultValue: 'Ulgurji' })})
+                          </span>
+                        ) : null}
                       </div>
                       <div className="mt-2 flex flex-wrap gap-2">
+                        {hasWholesalePrice({ wholesale_price: l.wholesalePrice }) ? (
+                          <div className="inline-flex rounded-xl border border-slate-600 overflow-hidden">
+                            <button
+                              type="button"
+                              className={`touch-btn min-h-10 px-2 text-xs ${
+                                (l.priceTier || 'retail') === 'retail'
+                                  ? 'bg-emerald-800 text-emerald-50'
+                                  : 'bg-slate-800 text-slate-300'
+                              }`}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setLinePriceTier(l.variantId, 'retail', { isBonus: l.isBonus })
+                              }}
+                            >
+                              {t('pos.priceRetail', { defaultValue: 'Chakana' })}
+                            </button>
+                            <button
+                              type="button"
+                              className={`touch-btn min-h-10 px-2 text-xs ${
+                                l.priceTier === 'wholesale'
+                                  ? 'bg-amber-800 text-amber-50'
+                                  : 'bg-slate-800 text-slate-300'
+                              }`}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setLinePriceTier(l.variantId, 'wholesale', { isBonus: l.isBonus })
+                              }}
+                            >
+                              {t('pos.priceWholesale', { defaultValue: 'Ulgurji' })}
+                            </button>
+                          </div>
+                        ) : null}
                         <button
                           type="button"
                           className={`touch-btn inline-flex items-center gap-1 text-xs px-3 py-2 rounded-xl border ${
@@ -1452,7 +1692,7 @@ export function PosPage({
                           type="button"
                           className="touch-btn min-h-kiosk-touch min-w-kiosk-touch rounded-xl bg-slate-800 border border-slate-600 text-lg font-semibold"
                           onClick={() =>
-                            incQty(l.variantId, l.unit === 'dona' ? -1 : -0.1, { isBonus: l.isBonus })
+                            incQty(l.variantId, -qtyStep(normalizeUnit(l.unit)), { isBonus: l.isBonus })
                           }
                         >
                           -
@@ -1463,16 +1703,16 @@ export function PosPage({
                           aria-label={t('pos.openNumpad')}
                           onClick={() => openAmountNumpad({ kind: 'qty', variantId: l.variantId, isBonus: l.isBonus })}
                         >
-                          {formatQty(l.qty, l.unit === 'dona' ? 'dona' : 'kg')}
+                          {formatQty(l.qty, normalizeUnit(l.unit))}
                           <span className="block text-[10px] text-slate-500 font-normal">
-                            {l.unit === 'dona' ? t('unit.dona', { defaultValue: 'dona' }) : t('unit.kg', { defaultValue: 'kg' })}
+                            {t(`unit.${normalizeUnit(l.unit)}`, { defaultValue: normalizeUnit(l.unit) })}
                           </span>
                         </button>
                         <button
                           type="button"
                           className="touch-btn min-h-kiosk-touch min-w-kiosk-touch rounded-xl bg-slate-800 border border-slate-600 text-lg font-semibold"
                           onClick={() =>
-                            incQty(l.variantId, l.unit === 'dona' ? 1 : 0.1, { isBonus: l.isBonus })
+                            incQty(l.variantId, qtyStep(normalizeUnit(l.unit)), { isBonus: l.isBonus })
                           }
                         >
                           +
@@ -1630,24 +1870,39 @@ export function PosPage({
                     ) : null}
 
                     {r.method === 'CASH' && activePayId === r.id ? (
-                      <div className="mt-2 pt-2 border-t border-slate-800 flex flex-wrap gap-1.5 items-center">
-                        <button
-                          type="button"
-                          className="touch-btn min-h-9 px-2.5 rounded-lg bg-emerald-950/60 border border-emerald-600/70 text-xs font-semibold text-emerald-300 hover:bg-emerald-900/80"
-                          onClick={() => updatePaymentRow(r.id, { amount: grand })}
-                        >
-                          {t('pay.quickCashExact', { defaultValue: 'Aniq' })} ({formatMoney(grand)})
-                        </button>
-                        {[50000, 100000, 200000, 500000, 1000000].map((val) => (
+                      <div className="mt-2 pt-2 border-t border-slate-800 space-y-1.5">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-400/90">
+                          {t('pay.tendered', { defaultValue: 'Berilgan (naqd)' })}
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 items-center">
                           <button
-                            key={val}
                             type="button"
-                            className="touch-btn min-h-9 px-2 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-300 hover:bg-slate-800"
-                            onClick={() => updatePaymentRow(r.id, { amount: String(val) })}
+                            className="touch-btn min-h-9 px-2.5 rounded-lg bg-emerald-950/60 border border-emerald-600/70 text-xs font-semibold text-emerald-300 hover:bg-emerald-900/80"
+                            onClick={() =>
+                              updatePaymentRow(r.id, {
+                                amount: cashChange.cashOwed.gt(0)
+                                  ? cashChange.cashOwed.toString()
+                                  : grand,
+                              })
+                            }
                           >
-                            {formatMoney(String(val))}
+                            {t('pay.quickCashExact', { defaultValue: 'Aniq' })} (
+                            {formatMoney(
+                              cashChange.cashOwed.gt(0) ? cashChange.cashOwed.toString() : grand,
+                            )}
+                            )
                           </button>
-                        ))}
+                          {[50000, 100000, 200000, 500000, 1000000].map((val) => (
+                            <button
+                              key={val}
+                              type="button"
+                              className="touch-btn min-h-9 px-2 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-300 hover:bg-slate-800"
+                              onClick={() => updatePaymentRow(r.id, { amount: String(val) })}
+                            >
+                              {formatMoney(String(val))}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     ) : null}
                   </div>
@@ -1822,24 +2077,129 @@ export function PosPage({
               ))}
             </div>
 
-            {cashChangeDue.gt(0) && (
-              <div className="rounded-xl border-2 border-emerald-500 bg-emerald-950/80 p-2.5 text-center shadow-lg shadow-emerald-950/60 animate-pulse">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-emerald-400">
-                  {t('pay.changeDue', { defaultValue: 'Mijozga qaytim (Сдача)' })}
+            {showCashTenderPanel && (
+              <div className="rounded-xl border border-slate-600 bg-slate-950/90 p-2.5 space-y-2">
+                <div className="flex justify-between gap-2 text-xs text-slate-400">
+                  <span>{t('pay.tendered', { defaultValue: 'Berilgan' })}</span>
+                  <span className="tabular-nums text-slate-100 font-semibold">
+                    {formatMoney(cashRowsTotal.toString())}
+                  </span>
                 </div>
-                <div className="text-2xl pos-lg:text-3xl font-black text-emerald-100 tabular-nums">
-                  {formatMoney(cashChangeDue.toString())}
+                <div className="flex justify-between gap-2 text-xs text-slate-400">
+                  <span>{t('pay.cashOwed', { defaultValue: 'Naqd kerak' })}</span>
+                  <span className="tabular-nums text-slate-200">
+                    {formatMoney(cashChange.cashOwed.toString())}
+                  </span>
                 </div>
+                {cashChange.shortfall.gt(0) ? (
+                  <div className="rounded-lg border border-amber-600/70 bg-amber-950/50 px-2 py-1.5 text-center">
+                    <div className="text-[11px] font-bold uppercase tracking-wide text-amber-400">
+                      {t('pay.tenderedShortLabel', { defaultValue: 'Yetishmayapti' })}
+                    </div>
+                    <div className="text-xl font-black text-amber-100 tabular-nums">
+                      {formatMoney(cashChange.shortfall.toString())}
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    className={`rounded-lg border px-2 py-1.5 text-center ${
+                      cashChangeDue.gt(0)
+                        ? 'border-emerald-500 bg-emerald-950/80'
+                        : 'border-slate-700 bg-slate-900'
+                    }`}
+                  >
+                    <div
+                      className={`text-[11px] font-bold uppercase tracking-wider ${
+                        cashChangeDue.gt(0) ? 'text-emerald-400' : 'text-slate-500'
+                      }`}
+                    >
+                      {t('pay.change', { defaultValue: 'Qaytim' })}
+                    </div>
+                    <div
+                      className={`font-black tabular-nums ${
+                        cashChangeDue.gt(0)
+                          ? 'text-2xl pos-lg:text-3xl text-emerald-100'
+                          : 'text-lg text-slate-400'
+                      }`}
+                    >
+                      {formatMoney(cashChangeDue.toString())}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
+            {(salePhase === 'picking' || salePhase === 'ready') && (
+              <div
+                className={`rounded-lg border px-2.5 py-2 text-xs ${
+                  salePhase === 'picking'
+                    ? 'border-amber-600/70 bg-amber-950/40 text-amber-100'
+                    : 'border-sky-600/70 bg-sky-950/40 text-sky-100'
+                }`}
+              >
+                {salePhase === 'picking'
+                  ? t('pos.phasePicking', {
+                      defaultValue: 'Yig‘ish: nakladnoy {{no}} — tekshirib «Tekshirildi» bosing',
+                      no: nakladnoyNo || '—',
+                    })
+                  : t('pos.phaseReady', {
+                      defaultValue: 'Tayyor: to‘lovni yakunlash mumkin ({{no}})',
+                      no: nakladnoyNo || '—',
+                    })}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2">
+              {salePhase === 'idle' ? (
+                <button
+                  type="button"
+                  disabled={nakladnoyBusy || cart.length === 0}
+                  className="touch-btn min-h-kiosk-touch rounded-xl border border-amber-500/80 bg-amber-900/70 hover:bg-amber-800 disabled:opacity-40 font-semibold text-kiosk-sm px-2"
+                  onClick={() => void printNakladnoy()}
+                >
+                  {nakladnoyBusy
+                    ? t('summary.saving')
+                    : t('pos.printNakladnoy', { defaultValue: 'Nakladnoy chop' })}
+                </button>
+              ) : salePhase === 'picking' ? (
+                <button
+                  type="button"
+                  className="touch-btn min-h-kiosk-touch rounded-xl border border-sky-500/80 bg-sky-800 hover:bg-sky-700 font-semibold text-kiosk-sm px-2"
+                  onClick={confirmPicked}
+                >
+                  {t('pos.confirmPicked', { defaultValue: 'Tekshirildi' })}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={nakladnoyBusy || cart.length === 0}
+                  className="touch-btn min-h-kiosk-touch rounded-xl border border-slate-500 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 font-semibold text-kiosk-sm px-2"
+                  onClick={() => void printNakladnoy()}
+                >
+                  {t('pos.reprintNakladnoy', { defaultValue: 'Qayta chop' })}
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={cart.length === 0 && salePhase === 'idle'}
+                className="touch-btn min-h-kiosk-touch rounded-xl border border-rose-600/70 bg-rose-950/60 hover:bg-rose-900/80 disabled:opacity-40 font-semibold text-kiosk-sm px-2"
+                onClick={cancelSaleFlow}
+              >
+                {t('pos.cancelSale', { defaultValue: 'Bekor' })}
+              </button>
+            </div>
+
             <button
               type="button"
-              disabled={completing || cart.length === 0}
+              disabled={completing || cart.length === 0 || salePhase === 'picking'}
               className="touch-btn w-full min-h-kiosk-touch pos-lg:min-h-14 py-2.5 pos-lg:py-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 font-semibold text-kiosk pos-lg:text-lg"
               onClick={() => void doComplete()}
             >
-              {completing ? t('summary.saving') : t('summary.completeTouch')}
+              {completing
+                ? t('summary.saving')
+                : salePhase === 'idle'
+                  ? t('pos.quickPay', { defaultValue: 'Tezkor to‘lov' })
+                  : t('summary.completeTouch')}
             </button>
           </div>
         </aside>
@@ -1868,8 +2228,8 @@ export function PosPage({
                       c.variantId === numpadCtx.variantId &&
                       Boolean(c.isBonus) === Boolean(numpadCtx.isBonus),
                   )
-                  const isKg = line?.unit !== 'dona'
-                  if (!isKg) return null
+                  // Optional g↔kg helper only for kg lines (not m/qop/dona).
+                  if (normalizeUnit(line?.unit) !== 'kg') return null
                   return (
                     <div className="flex gap-2 mb-1">
                       {(['kg', 'g'] as const).map((u) => (

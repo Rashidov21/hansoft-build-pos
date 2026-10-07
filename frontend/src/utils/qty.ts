@@ -1,8 +1,33 @@
-/** Honey shop quantity helpers (kg / dona). */
+/** Build-materials quantity helpers (dona / kg / m / qop). */
 
-export type ProductUnit = 'kg' | 'dona'
+export type ProductUnit = 'dona' | 'kg' | 'm' | 'qop'
 
-export const MIN_KG = 0.1
+export const PRODUCT_UNITS: ProductUnit[] = ['dona', 'kg', 'm', 'qop']
+
+const INTEGER_UNITS = new Set<ProductUnit>(['dona', 'qop'])
+
+/** @deprecated Honey-era constant; fractional min is 0.001 — prefer validateSaleQty. */
+export const MIN_KG = 0.001
+
+export function normalizeUnit(unit: unknown): ProductUnit {
+  const u = String(unit ?? '')
+    .trim()
+    .toLowerCase()
+  if (u === 'dona' || u === 'kg' || u === 'm' || u === 'qop') return u
+  return 'dona'
+}
+
+export function isIntegerUnit(unit: ProductUnit): boolean {
+  return INTEGER_UNITS.has(unit)
+}
+
+export function qtyStep(unit: ProductUnit): number {
+  return isIntegerUnit(unit) ? 1 : 0.1
+}
+
+export function defaultSaleQty(unit: ProductUnit): number {
+  return isIntegerUnit(unit) ? 1 : 0.1
+}
 
 export function parseQty(value: unknown): number {
   const n = Number(String(value ?? '').replace(',', '.'))
@@ -10,23 +35,28 @@ export function parseQty(value: unknown): number {
   return Math.round(n * 1000) / 1000
 }
 
-/** Convert UI entry (kg or grams) to stored kg. */
+/** Convert UI entry (kg or grams) to stored kg — only meaningful for unit=kg. */
 export function toKg(raw: number, inputUnit: 'kg' | 'g'): number {
   if (inputUnit === 'g') return parseQty(raw / 1000)
   return parseQty(raw)
 }
 
-export function formatQty(qty: number, unit: ProductUnit = 'kg'): string {
+export function formatQty(qty: number, unit: ProductUnit = 'dona'): string {
   const q = parseQty(qty)
-  if (unit === 'dona') return String(Math.round(q))
-  return q.toFixed(3).replace(/\.?0+$/, (m) => (m.includes('.') ? m.replace(/0+$/, '').replace(/\.$/, '') : m)) || '0'
+  if (isIntegerUnit(unit)) return String(Math.round(q))
+  return (
+    q.toFixed(3).replace(/\.?0+$/, (m) => (m.includes('.') ? m.replace(/0+$/, '').replace(/\.$/, '') : m)) || '0'
+  )
 }
 
 export function validateSaleQty(qty: number, unit: ProductUnit): string | null {
   const q = parseQty(qty)
   if (q <= 0) return 'invalid'
-  if (unit === 'kg' && q < MIN_KG) return 'min_kg'
-  if (unit === 'dona' && (!Number.isInteger(q) || q < 1)) return 'min_dona'
+  if (isIntegerUnit(unit)) {
+    if (!Number.isInteger(q) || q < 1) return 'min_dona'
+  } else if (q < 0.001) {
+    return 'min_frac'
+  }
   return null
 }
 
@@ -50,7 +80,7 @@ export function appendQtyDigit(buf: string, key: string, unit: ProductUnit): str
     return next === '' || next === '-' ? '0' : next
   }
   if (key === '.' || key === ',') {
-    if (unit === 'dona') return buf
+    if (isIntegerUnit(unit)) return buf
     if (buf.includes('.')) return buf
     return `${buf}.`
   }

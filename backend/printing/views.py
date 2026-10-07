@@ -9,7 +9,14 @@ from core.permissions import IsAdminOrOwner, IsCashier
 from sales.models import Sale
 
 from .models import StoreSettings
-from .receipt import receipt_plain_text, resolve_receipt_store_lang, sale_to_receipt_dict
+from .receipt import (
+    build_nakladnoy_dict,
+    nakladnoy_escpos_bytes,
+    nakladnoy_plain_text,
+    receipt_plain_text,
+    resolve_receipt_store_lang,
+    sale_to_receipt_dict,
+)
 from .services import PrinterFactory
 
 
@@ -25,6 +32,7 @@ from .serializers import (
     HardwareConfigSerializer,
     LabelQueueSerializer,
     LabelSingleSerializer,
+    NakladnoyEscposSerializer,
     StoreSettingsSerializer,
 )
 
@@ -143,6 +151,46 @@ class ReceiptEscposView(APIView):
                 "printer_name": settings.receipt_printer_name,
                 "printer_type": settings.receipt_printer_type,
                 "receipt_width": dto.get("store", {}).get("receipt_width", "58mm"),
+            }
+        )
+
+
+class NakladnoyEscposView(APIView):
+    """Print pick-list / nakladnoy from cart lines. Does not create a Sale or touch stock."""
+
+    permission_classes = [IsAuthenticated, IsCashier]
+
+    def post(self, request):
+        import base64
+        from datetime import datetime
+
+        ser = NakladnoyEscposSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+        public_no = (data.get("public_no") or "").strip()
+        if not public_no:
+            public_no = "NK-" + datetime.now().strftime("%y%m%d-%H%M%S")
+        dto = build_nakladnoy_dict(
+            lines=data["lines"],
+            cashier_username=getattr(request.user, "username", "") or "",
+            public_no=public_no,
+            lang=_request_lang(request),
+            note=data.get("note") or "",
+        )
+        try:
+            raw = nakladnoy_escpos_bytes(dto)
+        except (FileNotFoundError, OSError) as exc:
+            return _escpos_bundle_error_response(exc)
+        settings = StoreSettings.get_solo()
+        return Response(
+            {
+                "public_no": public_no,
+                "nakladnoy": dto,
+                "plain_text": nakladnoy_plain_text(dto),
+                "raw_base64": base64.b64encode(raw).decode("ascii"),
+                "escpos_base64": base64.b64encode(raw).decode("ascii"),
+                "printer_name": settings.receipt_printer_name,
+                "stock_changed": False,
             }
         )
 

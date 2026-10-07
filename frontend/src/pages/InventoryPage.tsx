@@ -4,7 +4,7 @@ import { fetchVariants } from '../api'
 import { useTranslation } from 'react-i18next'
 import { ActionToast } from '../components/ActionToast'
 import { DecimalQtyField } from '../components/DecimalQtyField'
-import { formatQty, parseQty, type ProductUnit } from '../utils/qty'
+import { formatQty, normalizeUnit, parseQty, type ProductUnit } from '../utils/qty'
 import { filterVariantsForPicker, stocktakeLineMatchesSearch } from '../utils/variantSearch'
 
 type InventoryMode = 'receive' | 'adjust' | 'stocktake'
@@ -177,7 +177,7 @@ function pickCategoryName(v: Variant, langRu: boolean): string {
 }
 
 function unitOf(v: Pick<Variant, 'unit'> | null | undefined): ProductUnit {
-  return v?.unit === 'dona' ? 'dona' : 'kg'
+  return normalizeUnit(v?.unit)
 }
 
 function stockLabel(v: Variant): string {

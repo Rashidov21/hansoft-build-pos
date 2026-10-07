@@ -1,5 +1,10 @@
 import i18n from '../i18n'
-import { fetchReceiptEscpos, fetchReceiptPlain } from '../api'
+import {
+  fetchNakladnoyEscpos,
+  fetchReceiptEscpos,
+  fetchReceiptPlain,
+  type NakladnoyLinePayload,
+} from '../api'
 import { listInstalledPrinters, printRawBase64 } from './tauriPrint'
 
 type PrintKind = 'receipt' | 'label'
@@ -123,6 +128,34 @@ export async function printReceiptWithFallback(
     const { invoke } = await import('@tauri-apps/api/tauri')
     await invoke('print_plain', { text: plain })
     return { kind: 'plain' }
+  }
+  throw new Error(i18n.t('err.PRINTER_RECEIPT_PAYLOAD_EMPTY'))
+}
+
+export type PrintNakladnoyResult = PrintReceiptResult & { public_no: string }
+
+/** Print pick-list / nakladnoy from cart lines (no stock change). */
+export async function printNakladnoyWithFallback(
+  lines: NakladnoyLinePayload[],
+  settings: PrinterSettingsLike | null,
+  opts?: { note?: string; public_no?: string },
+): Promise<PrintNakladnoyResult> {
+  const res = await fetchNakladnoyEscpos({
+    lines,
+    note: opts?.note,
+    public_no: opts?.public_no,
+  })
+  const public_no = res.public_no || opts?.public_no || ''
+  const b64 = (res.raw_base64 ?? res.escpos_base64 ?? '').trim()
+  if (b64) {
+    const printer = await dispatchReceipt(b64, settings)
+    return { kind: 'escpos', printer, public_no }
+  }
+  const plain = (res.plain_text || '').trim()
+  if (plain) {
+    const { invoke } = await import('@tauri-apps/api/tauri')
+    await invoke('print_plain', { text: plain })
+    return { kind: 'plain', public_no }
   }
   throw new Error(i18n.t('err.PRINTER_RECEIPT_PAYLOAD_EMPTY'))
 }

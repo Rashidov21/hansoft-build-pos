@@ -305,7 +305,168 @@ def _normalize_text(text: str, translit: bool) -> str:
     return text
 
 
+def _nakladnoy_labels(lang: str) -> dict[str, str]:
+    normalized = _normalize_lang(lang)
+    if normalized == "ru":
+        return {
+            "title": "НАКЛАДНАЯ (сборка)",
+            "no": "Nomer",
+            "time": "Vremya",
+            "cashier": "Kassir",
+            "qty": "Kol-vo",
+            "total": "Itogo",
+            "hint": "Sklad ne spisan. Oplata posle sborki.",
+            "check": "[ ]",
+        }
+    return {
+        "title": "NAKLADNOY (yig'ish)",
+        "no": "Raqam",
+        "time": "Vaqt",
+        "cashier": "Kassir",
+        "qty": "Miqdor",
+        "total": "Jami",
+        "hint": "Ombor kamaytirilmagan. To'lov yig'ishdan keyin.",
+        "check": "[ ]",
+    }
+
+
+def build_nakladnoy_dict(
+    *,
+    lines: list[dict],
+    cashier_username: str,
+    public_no: str,
+    lang: str = "uz",
+    note: str = "",
+) -> dict:
+    """Build print DTO for pick-list (no Sale / no stock)."""
+    from datetime import datetime, timezone
+
+    settings = StoreSettings.get_solo()
+    store_lang = resolve_receipt_store_lang(settings, lang)
+    lines_out = []
+    subtotal = Decimal("0")
+    for ln in lines:
+        qty = Decimal(str(ln.get("qty") or "0"))
+        unit_price = Decimal(str(ln.get("unit_price") or "0"))
+        line_total = Decimal(str(ln.get("line_total") or (qty * unit_price)))
+        subtotal += line_total
+        unit = (ln.get("unit") or "").strip() or "dona"
+        lines_out.append(
+            {
+                "name": (ln.get("name") or "").strip() or "—",
+                "qty": str(qty),
+                "unit_label": unit,
+                "unit": _format_amount(unit_price),
+                "total": _format_amount(line_total),
+            }
+        )
+    now = datetime.now(timezone.utc).astimezone().isoformat()
+    return {
+        "doc_type": "nakladnoy",
+        "store": {
+            "brand_name": settings.brand_name,
+            "phone": settings.phone,
+            "address": settings.address,
+            "footer_note": settings.footer_note,
+            "transliterate_uz": settings.transliterate_uz,
+            "encoding": settings.encoding,
+            "lang": store_lang,
+            "receipt_width": settings.receipt_width or "80mm",
+            "receipt_font_size": int(getattr(settings, "receipt_font_size", 0) or 0),
+            "receipt_printer_name": settings.receipt_printer_name or "",
+            "receipt_printer_type": settings.receipt_printer_type,
+        },
+        "public_no": public_no,
+        "created_at": now,
+        "cashier": cashier_username,
+        "note": (note or "").strip(),
+        "lines": lines_out,
+        "grand_total": _format_amount(subtotal),
+    }
+
+
+def nakladnoy_plain_text(dto: dict) -> str:
+    store = dto.get("store", {})
+    lang = _normalize_lang(store.get("lang", "uz"))
+    translit = bool(store.get("transliterate_uz", True)) and lang not in ("ru", "ky")
+    labels = _nakladnoy_labels(lang)
+
+    def t(v: str) -> str:
+        return _normalize_text(v, translit)
+
+    buf: list[str] = []
+    width = 42 if store.get("receipt_width") == "80mm" else 34
+    brand = t(store.get("brand_name", "Hansoft POS"))
+    buf.append(brand)
+    buf.append(t(labels["title"]))
+    buf.append(_line_80mm(labels["no"], str(dto.get("public_no") or ""), width=width))
+    created = str(dto.get("created_at") or "")[:19]
+    buf.append(_line_80mm(labels["time"], created, width=width))
+    buf.append(_line_80mm(labels["cashier"], t(str(dto.get("cashier") or "")), width=width))
+    if dto.get("note"):
+        for row in _wrap_text(t(str(dto["note"])), width):
+            buf.append(row)
+    buf.append("-" * width)
+    for ln in dto.get("lines") or []:
+        title = t(str(ln.get("name") or ""))
+        wrapped = _wrap_text(title, width)
+        if wrapped:
+            buf.extend(wrapped)
+        else:
+            buf.append(title[:width])
+        qty_u = f"{ln.get('qty')} {ln.get('unit_label') or ''}".strip()
+        buf.append(
+            _line_80mm(
+                f"{labels['check']} {qty_u} x {ln.get('unit')}",
+                str(ln.get("total") or "0"),
+                width=width,
+            )
+        )
+    buf.append("-" * width)
+    buf.append(_line_80mm(labels["total"], str(dto.get("grand_total") or "0"), width=width))
+    buf.append("-" * width)
+    for row in _wrap_text(t(labels["hint"]), width):
+        buf.append(row)
+    buf.append("")
+    buf.append("--- CUT HERE ---")
+    buf.append("")
+    return "\n".join(buf)
+
+
+def nakladnoy_escpos_bytes(dto: dict) -> bytes:
+    """Render nakladnoy using the same ESC/POS path as receipts."""
+    # Reuse receipt renderer by adapting DTO shape expected by receipt_escpos_bytes.
+    adapted = {
+        "store": dto.get("store", {}),
+        "sale_id": dto.get("public_no") or "nakladnoy",
+        "public_sale_no": dto.get("public_no") or "",
+        "completed_at": dto.get("created_at") or "",
+        "cashier": dto.get("cashier") or "",
+        "lines": [
+            {
+                "name": ln.get("name"),
+                "barcode": None,
+                "qty": ln.get("qty"),
+                "unit": f"{ln.get('unit_label') or ''} {ln.get('unit') or ''}".strip(),
+                "total": ln.get("total"),
+            }
+            for ln in (dto.get("lines") or [])
+        ],
+        "subtotal": dto.get("grand_total") or "0",
+        "discount_total": "0",
+        "grand_total": dto.get("grand_total") or "0",
+        "payments": [],
+        "_plain_override": nakladnoy_plain_text(dto),
+    }
+    return receipt_escpos_bytes(adapted)
+
+
 def receipt_plain_text(receipt: dict) -> str:
+    if receipt.get("_plain_override"):
+        return str(receipt["_plain_override"])
+    if receipt.get("doc_type") == "nakladnoy":
+        return nakladnoy_plain_text(receipt)
+
     store = receipt.get("store", {})
     lang = _normalize_lang(store.get("lang", "uz"))
     # Do not Latinize Cyrillic receipt bodies for RU/KY label sets.

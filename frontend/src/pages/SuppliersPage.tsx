@@ -6,7 +6,7 @@ import { pickBilingualName, pickProductName } from '../utils/localizedName'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { ActionToast } from '../components/ActionToast'
 import { NumericNumpadField } from '../components/NumericNumpadField'
-import { formatQty, parseQty, sanitizeDecimalInput } from '../utils/qty'
+import { formatQty, isIntegerUnit, normalizeUnit, parseQty, sanitizeDecimalInput } from '../utils/qty'
 import {
   fetchSuppliers,
   createSupplier,
@@ -449,8 +449,8 @@ export function SuppliersPage() {
                       >
                         {pickProductName(v, i18n.language)}
                         <span className="block text-xs text-slate-500">
-                          {formatQty(Number(v.stock_qty ?? 0), v.unit === 'dona' ? 'dona' : 'kg')}{' '}
-                          {v.unit === 'dona' ? 'dona' : 'kg'}
+                          {formatQty(Number(v.stock_qty ?? 0), normalizeUnit(v.unit))}{' '}
+                          {normalizeUnit(v.unit)}
                         </span>
                       </button>
                     </li>
@@ -471,7 +471,7 @@ export function SuppliersPage() {
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <label className="text-xs text-slate-400">
-                      {t('cart.qty')} ({line.variant.unit === 'dona' ? 'dona' : 'kg'})
+                      {t('cart.qty')} ({normalizeUnit(line.variant.unit)})
                       <input
                         type="text"
                         inputMode="decimal"
@@ -520,7 +520,9 @@ export function SuppliersPage() {
                       note: receiptNote,
                       lines: receiptLines.map((row) => ({
                         variant_id: row.variant.id,
-                        qty: row.variant.unit === 'dona' ? Math.max(1, Math.round(parseQty(row.qty) || 1)) : Math.max(0.001, parseQty(row.qty) || 0.001),
+                        qty: isIntegerUnit(normalizeUnit(row.variant.unit))
+                          ? Math.max(1, Math.round(parseQty(row.qty) || 1))
+                          : Math.max(0.001, parseQty(row.qty) || 0.001),
                         unit_cost: row.unit_cost || '0',
                       })),
                     })

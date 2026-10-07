@@ -4,7 +4,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.db import models
 
-from core.qty import UNIT_CHOICES, UNIT_KG
+from core.qty import UNIT_CHOICES, UNIT_DONA
 
 
 def _fill_bilingual_names(instance, *, has_cyrillic: bool = False) -> None:
@@ -92,8 +92,8 @@ class Product(models.Model):
 
 class ProductVariant(models.Model):
     """
-    Sellable SKU for honey / bee-product retail.
-    Prices are per unit (sum/kg or sum/dona). stock_qty is in the same unit.
+    Sellable SKU for build-materials retail.
+    Prices are per unit (sum/dona, sum/kg, sum/m, sum/qop). stock_qty is in the same unit.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     product = models.ForeignKey(
@@ -103,11 +103,13 @@ class ProductVariant(models.Model):
     unit = models.CharField(
         max_length=8,
         choices=UNIT_CHOICES,
-        default=UNIT_KG,
-        help_text="kg = weight (price per kg); dona = pieces",
+        default=UNIT_DONA,
+        help_text="dona|qop = whole pieces; kg|m = fractional",
     )
     purchase_price = models.DecimalField(max_digits=12, decimal_places=2)
     list_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    # Optional wholesale (ulgurji) sell price; retail remains list_price.
+    wholesale_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     stock_qty = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal("0"))
     show_price_on_label = models.BooleanField(default=True)
     hide_selling_price = models.BooleanField(default=False)

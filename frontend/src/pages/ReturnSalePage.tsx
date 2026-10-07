@@ -16,6 +16,7 @@ import { ActionToast } from '../components/ActionToast'
 import { NumericNumpadField } from '../components/NumericNumpadField'
 import { formatMoney } from '../utils/money'
 import { pickBilingualName } from '../utils/localizedName'
+import { normalizeUnit } from '../utils/qty'
 
 const RETURN_SEARCH_DEBOUNCE_MS = 380
 
@@ -345,13 +346,13 @@ export function ReturnSalePage({ embedded = false }: { embedded?: boolean }) {
   )
   const returnSummaryUnit = useMemo(() => {
     const selected = lines.filter((ln) => (qtyByVariant[ln.variant_id] || 0) > 0)
-    if (!selected.length) return t('unit.kg')
-    const units = new Set(selected.map((ln) => (ln.unit === 'dona' ? 'dona' : 'kg')))
+    if (!selected.length) return t('unit.dona')
+    const units = new Set(selected.map((ln) => normalizeUnit(ln.unit)))
     if (units.size === 1) {
       const only = [...units][0]
       return t(`unit.${only}`)
     }
-    return `${t('unit.kg')} / ${t('unit.dona')}`
+    return [...units].map((u) => t(`unit.${u}`)).join(' / ')
   }, [lines, qtyByVariant, t])
 
   const returnAmountEst = useMemo(() => {
@@ -621,7 +622,7 @@ export function ReturnSalePage({ embedded = false }: { embedded?: boolean }) {
                             {t('admin.return.canReturn', {
                               remaining: max,
                               sold: ln.sold_qty,
-                              unit: t(`unit.${ln.unit === 'dona' ? 'dona' : 'kg'}`),
+                              unit: t(`unit.${normalizeUnit(ln.unit)}`),
                             })}
                           </p>
                         </div>

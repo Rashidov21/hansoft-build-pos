@@ -202,9 +202,10 @@ export type PosVariant = {
   category_name_ru?: string
   barcode: string | null
   list_price: string | null
+  wholesale_price?: string | null
   purchase_price?: string
   stock_qty: number | string
-  unit?: 'kg' | 'dona'
+  unit?: 'dona' | 'kg' | 'm' | 'qop'
   is_active: boolean
   deleted_at: string | null
   hide_selling_price?: boolean
@@ -388,6 +389,43 @@ export async function fetchReceiptPlain(saleId: string): Promise<string | null> 
   return j.plain_text as string | null
 }
 
+export type NakladnoyLinePayload = {
+  name: string
+  qty: string | number
+  unit?: string
+  unit_price: string | number
+  line_total?: string | number
+}
+
+export type NakladnoyEscposResponse = {
+  public_no: string
+  plain_text?: string | null
+  raw_base64?: string | null
+  escpos_base64?: string | null
+  stock_changed?: boolean
+}
+
+/** Pick-list print (A1): does not create a Sale or change stock. */
+export async function fetchNakladnoyEscpos(body: {
+  lines: NakladnoyLinePayload[]
+  note?: string
+  public_no?: string
+}): Promise<NakladnoyEscposResponse> {
+  const csrf = (await fetchCsrf()) || getCookie('csrftoken') || ''
+  const r = await fetch(`${API}/api/printing/nakladnoy/escpos/`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': csrf,
+      'Accept-Language': getUiLanguageHeader(),
+    },
+    body: JSON.stringify(body),
+  })
+  if (!r.ok) throw await parseErrorResponse(r, 'NAKLADNOY_PRINT_FAILED')
+  return (await r.json()) as NakladnoyEscposResponse
+}
+
 export type UserRole = 'CASHIER' | 'ADMIN' | 'OWNER'
 
 export type MeResponse = {
@@ -567,8 +605,9 @@ export type Variant = {
   barcode: string | null
   purchase_price: string
   list_price: string | null
+  wholesale_price?: string | null
   stock_qty: number | string
-  unit?: 'kg' | 'dona'
+  unit?: 'dona' | 'kg' | 'm' | 'qop'
   show_price_on_label: boolean
   hide_selling_price: boolean
   is_active: boolean
@@ -592,9 +631,10 @@ export type CashierStockVariant = {
   product_category_name_ru?: string | null
   barcode: string | null
   list_price: string | null
+  wholesale_price?: string | null
   purchase_price?: string
   stock_qty: number | string
-  unit?: 'kg' | 'dona'
+  unit?: 'dona' | 'kg' | 'm' | 'qop'
   is_active: boolean
   hide_selling_price: boolean
   color?: string | null
@@ -833,8 +873,9 @@ export async function fetchCashierStockVariants(params?: {
 export type BulkGridCell = {
   purchase_price: string
   list_price?: string
+  wholesale_price?: string
   initial_qty?: number | string
-  unit?: 'kg' | 'dona'
+  unit?: 'dona' | 'kg' | 'm' | 'qop'
   barcode?: string
   color?: string
 }
@@ -857,12 +898,13 @@ export async function updateVariant(
   patch: Partial<{
     purchase_price: string
     list_price: string
+    wholesale_price: string | null
     is_active: boolean
     barcode: string
     hide_selling_price: boolean
     show_price_on_label: boolean
     color: string
-    unit: 'kg' | 'dona'
+    unit: 'dona' | 'kg' | 'm' | 'qop'
   }>,
 ) {
   const csrf = (await fetchCsrf()) || getCookie('csrftoken') || ''
@@ -1478,7 +1520,7 @@ export type SaleReturnEligibleLineRow = {
   line_discount?: string
   line_total_sold?: string
   stock_qty?: number
-  unit?: 'kg' | 'dona'
+  unit?: 'dona' | 'kg' | 'm' | 'qop'
 }
 
 export type SaleReturnState = 'returnable' | 'fully_returned' | 'no_lines'

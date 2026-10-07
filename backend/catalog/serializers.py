@@ -84,6 +84,7 @@ class ProductVariantSerializer(serializers.ModelSerializer):
             "barcode",
             "purchase_price",
             "list_price",
+            "wholesale_price",
             "stock_qty",
             "show_price_on_label",
             "hide_selling_price",
@@ -134,6 +135,7 @@ class CashierStockRowSerializer(serializers.ModelSerializer):
             "unit",
             "barcode",
             "list_price",
+            "wholesale_price",
             "purchase_price",
             "stock_qty",
             "is_active",
@@ -180,6 +182,7 @@ class PosProductVariantSerializer(serializers.ModelSerializer):
             "unit",
             "barcode",
             "list_price",
+            "wholesale_price",
             "purchase_price",
             "stock_qty",
             "is_active",
@@ -196,26 +199,36 @@ class PosProductVariantSerializer(serializers.ModelSerializer):
 
 
 class SimpleBulkCreateSerializer(serializers.Serializer):
-    """Simplified create for honey/bee-product SKUs."""
+    """Simplified create for catalog SKUs."""
     product_id = serializers.UUIDField()
     purchase_price = serializers.DecimalField(max_digits=12, decimal_places=2)
     list_price = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
+    wholesale_price = serializers.DecimalField(
+        max_digits=12, decimal_places=2, required=False, allow_null=True
+    )
     initial_qty = serializers.DecimalField(
         max_digits=12, decimal_places=3, required=False, default=Decimal("0"), min_value=Decimal("0")
     )
     barcode = serializers.CharField(max_length=64, required=False, allow_blank=True)
-    unit = serializers.ChoiceField(choices=["kg", "dona"], required=False, default="kg")
+    unit = serializers.ChoiceField(
+        choices=["dona", "kg", "m", "qop"], required=False, default="dona"
+    )
 
 
 class BulkGridCellSerializer(serializers.Serializer):
     """One SKU row: prices, qty, unit, optional barcode."""
     purchase_price = serializers.DecimalField(max_digits=12, decimal_places=2)
     list_price = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
+    wholesale_price = serializers.DecimalField(
+        max_digits=12, decimal_places=2, required=False, allow_null=True
+    )
     initial_qty = serializers.DecimalField(
         max_digits=12, decimal_places=3, required=False, default=Decimal("0"), min_value=Decimal("0")
     )
     barcode = serializers.CharField(max_length=64, required=False, allow_blank=True)
-    unit = serializers.ChoiceField(choices=["kg", "dona"], required=False, default="kg")
+    unit = serializers.ChoiceField(
+        choices=["dona", "kg", "m", "qop"], required=False, default="dona"
+    )
 
 
 class BulkGridSerializer(serializers.Serializer):

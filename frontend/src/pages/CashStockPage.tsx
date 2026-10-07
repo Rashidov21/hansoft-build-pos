@@ -5,7 +5,7 @@ import { fetchCashierStockVariants, fetchVariants } from '../api'
 import { formatMoney } from '../utils/money'
 import { ActionToast } from '../components/ActionToast'
 import { dateLocale as resolveDateLocale } from '../utils/localizedName'
-import { formatQty } from '../utils/qty'
+import { formatQty, normalizeUnit } from '../utils/qty'
 
 export function CashStockPage({ role }: { role: UserRole | null }) {
   const { t, i18n } = useTranslation()
@@ -111,8 +111,8 @@ export function CashStockPage({ role }: { role: UserRole | null }) {
                   </td>
                   <td className="p-2 text-slate-300">{rowCategory(v)}</td>
                   <td className="p-2 text-right tabular-nums">
-                    {formatQty(Number(v.stock_qty ?? 0), v.unit === 'dona' ? 'dona' : 'kg')}{' '}
-                    {t(`unit.${v.unit === 'dona' ? 'dona' : 'kg'}`)}
+                    {formatQty(Number(v.stock_qty ?? 0), normalizeUnit(v.unit))}{' '}
+                    {t(`unit.${normalizeUnit(v.unit)}`)}
                   </td>
                   <td className="p-2 text-xs text-slate-400 whitespace-nowrap">
                     {v.last_received_at ? new Date(v.last_received_at).toLocaleString(dateLocaleStr) : '—'}

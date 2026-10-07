@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from .models import StoreSettings
@@ -101,3 +103,25 @@ class HardwareConfigSerializer(serializers.ModelSerializer):
             "scanner_suffix",
             "lock_timeout_minutes",
         ]
+
+
+class NakladnoyLineSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=500)
+    qty = serializers.DecimalField(
+        max_digits=12, decimal_places=3, min_value=Decimal("0.001")
+    )
+    unit = serializers.CharField(max_length=16, required=False, default="dona", allow_blank=True)
+    unit_price = serializers.DecimalField(
+        max_digits=12, decimal_places=2, min_value=Decimal("0")
+    )
+    line_total = serializers.DecimalField(
+        max_digits=14, decimal_places=2, required=False, allow_null=True
+    )
+
+
+class NakladnoyEscposSerializer(serializers.Serializer):
+    """Pick-list print payload (A1: no stock change)."""
+
+    lines = NakladnoyLineSerializer(many=True, allow_empty=False)
+    note = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
+    public_no = serializers.CharField(max_length=32, required=False, allow_blank=True, default="")

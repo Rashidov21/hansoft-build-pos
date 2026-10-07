@@ -2,7 +2,9 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { CartNameFields } from '../utils/posCartName'
 import { formatPosCartLineName } from '../utils/posCartName'
-import { parseQty, type ProductUnit } from '../utils/qty'
+import { defaultSaleQty, normalizeUnit, parseQty, type ProductUnit } from '../utils/qty'
+
+export type PriceTier = 'retail' | 'wholesale'
 
 export type CartLine = {
   variantId: string
@@ -10,12 +12,17 @@ export type CartLine = {
   barcode: string
   name: string
   nameFields?: CartNameFields
+  /** Active unit sell price (retail or wholesale). */
   listPrice: string
+  /** Catalog retail (chakana); used when switching tier. */
+  retailPrice?: string
+  /** Catalog wholesale (ulgurji), if any. */
+  wholesalePrice?: string | null
+  priceTier?: PriceTier
   /** Kelish narxi — faqat admin/owner POS da ko'radi. */
   purchasePrice?: string
   stockQty?: number
   qty: number
-  /** kg = weight (price per kg); dona = pieces */
   unit?: ProductUnit
   /** Bonus line: listPrice kept for display; paid amount treated as 0. */
   isBonus?: boolean
@@ -60,6 +67,11 @@ type PosState = {
   setPayMode: (m: PayMode) => void
   setCustomer: (name: string, phone: string) => void
   updateLinePrice: (variantId: string, listPrice: string, opts?: { isBonus?: boolean }) => void
+  setLinePriceTier: (
+    variantId: string,
+    tier: PriceTier,
+    opts?: { isBonus?: boolean },
+  ) => void
   updateLineStock: (variantId: string, stockQty: number) => void
   /** Toggle bonus on the exact cart line (paid vs bonus of same variant stay distinct). */
   toggleLineBonus: (fields: CartLineKeyFields) => void
@@ -82,8 +94,8 @@ export const usePosStore = create<PosState>()(
       customerPhone: '',
       addLine: (line) => {
         const cart = get().cart
-        const unit: ProductUnit = line.unit === 'dona' ? 'dona' : 'kg'
-        const add = parseQty(line.qty ?? (unit === 'dona' ? 1 : 0.1))
+        const unit: ProductUnit = normalizeUnit(line.unit)
+        const add = parseQty(line.qty ?? defaultSaleQty(unit))
         const isBonus = Boolean(line.isBonus)
         const key = cartLineKey({ variantId: line.variantId, isBonus })
 
@@ -102,6 +114,9 @@ export const usePosStore = create<PosState>()(
                     nameFields: line.nameFields ?? c.nameFields,
                     name: line.name || c.name,
                     purchasePrice: line.purchasePrice ?? c.purchasePrice,
+                    retailPrice: line.retailPrice ?? c.retailPrice,
+                    wholesalePrice: line.wholesalePrice ?? c.wholesalePrice,
+                    priceTier: line.priceTier ?? c.priceTier,
                   }
                 : c,
             ),
@@ -117,6 +132,9 @@ export const usePosStore = create<PosState>()(
                 name: line.name,
                 nameFields: line.nameFields,
                 listPrice: line.listPrice,
+                retailPrice: line.retailPrice ?? line.listPrice,
+                wholesalePrice: line.wholesalePrice ?? null,
+                priceTier: line.priceTier ?? 'retail',
                 purchasePrice: line.purchasePrice,
                 stockQty: line.stockQty,
                 qty: add,
@@ -161,6 +179,22 @@ export const usePosStore = create<PosState>()(
             if (c.variantId !== variantId) return c
             if (Boolean(c.isBonus) !== Boolean(opts?.isBonus)) return c
             return { ...c, listPrice }
+          }),
+        }),
+      setLinePriceTier: (variantId, tier, opts) =>
+        set({
+          cart: get().cart.map((c) => {
+            if (c.variantId !== variantId) return c
+            if (Boolean(c.isBonus) !== Boolean(opts?.isBonus)) return c
+            const wholesale = c.wholesalePrice
+            const hasWs =
+              wholesale != null && String(wholesale).trim() !== '' && Number(wholesale) > 0
+            if (tier === 'wholesale' && !hasWs) return c
+            const nextPrice =
+              tier === 'wholesale' && hasWs
+                ? String(wholesale)
+                : String(c.retailPrice ?? c.listPrice)
+            return { ...c, priceTier: tier, listPrice: nextPrice }
           }),
         }),
       updateLineStock: (variantId, stockQty) =>

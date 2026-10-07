@@ -856,10 +856,11 @@ function AdminPanel(props: {
     patch: {
       purchase_price: string
       list_price: string
+      wholesale_price?: string | null
       hide_selling_price?: boolean
       show_price_on_label?: boolean
       color?: string
-      unit?: 'kg' | 'dona'
+      unit?: 'dona' | 'kg' | 'm' | 'qop'
     },
   ) => Promise<void>
   onDeleteVariant: (variantId: string) => Promise<void>
