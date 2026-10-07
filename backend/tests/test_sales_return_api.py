@@ -150,7 +150,7 @@ def test_sale_return_search_and_lines_include_extended_fields():
     assert row["preview_lines"]
     pl0 = row["preview_lines"][0]
     assert pl0["barcode"] == "BC-DETAIL-1"
-    assert pl0["qty"] == 2
+    assert Decimal(str(pl0["qty"])) == Decimal("2")
     assert "list_unit_price" in pl0
     variant.refresh_from_db()
     assert Decimal(str(pl0["stock_qty"])) == variant.stock_qty
@@ -161,10 +161,10 @@ def test_sale_return_search_and_lines_include_extended_fields():
     assert body["payments"]
     assert body["grand_total"]
     ln0 = body["lines"][0]
-    assert ln0["remaining_qty"] == 2
-    assert "line_total_sold" in ln0
+    assert Decimal(str(ln0["remaining_qty"])) == Decimal("2")
     assert "stock_qty" in ln0
     assert ln0["category_name_uz"]
+    assert "line_total" in ln0
 
 
 @pytest.mark.django_db
