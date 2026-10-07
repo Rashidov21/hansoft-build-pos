@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en" class="theme-dark">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/resized-logo.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hansoft POS</title>
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('geeks_pos_theme')
+          if (t !== 'light' && t !== 'dark') t = 'dark'
+          var root = document.documentElement
+          root.classList.remove('theme-light', 'theme-dark')
+          root.classList.add(t === 'light' ? 'theme-light' : 'theme-dark')
+          root.dataset.theme = t
+          root.style.colorScheme = t
+          if (t === 'light') {
+            root.style.background = '#f8fafc'
+          }
+        } catch (e) {
+          document.documentElement.classList.add('theme-dark')
+        }
+      })()
+    </script>
+    <style>
+      html, body, #root { min-height: 100dvh; height: 100%; }
+      html, body { margin: 0; background: #020617; }
+      html.theme-light, html.theme-light body { background: #f8fafc; }
+      .boot-fallback {
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #e2e8f0;
+        font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      }
+      html.theme-light .boot-fallback { color: #0f172a; }
+      .boot-box { text-align: center; display: grid; gap: 12px; }
+      .spinner {
+        width: 40px;
+        height: 40px;
+        margin: 0 auto;
+        border: 4px solid #334155;
+        border-top-color: #10b981;
+        border-radius: 9999px;
+        animation: spin 1s linear infinite;
+      }
+      html.theme-light .spinner { border-color: #cbd5e1; border-top-color: #059669; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div class="boot-fallback">
+        <div class="boot-box">
+          <div class="spinner"></div>
+          <div>Hansoft POS yuklanmoqda...</div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

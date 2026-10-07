@@ -1,0 +1,161 @@
+import uuid
+from decimal import Decimal
+
+import pytest
+from django.contrib.auth.models import User
+
+from catalog.models import Category, Product, ProductVariant
+from debt.models import Customer, Debt, DebtPayment, DebtPaymentAllocation
+from core.exceptions import DebtPolicyError
+from debt.services import record_debt_payment
+from sales.services import complete_sale
+
+
+@pytest.fixture
+def cashier(db):
+    u = User.objects.create_user(username="c2", password="pass12345")
+    return u
+
+
+@pytest.fixture
+def customer(db):
+    return Customer.objects.create(
+        name="Ali", phone_normalized="998901112233", note=""
+    )
+
+
+def _mk_variant(cashier, *, name="P", stock=10, list_price="100", purchase="10"):
+    cat = Category.objects.create(name_uz=name, name_ru=name)
+    prod = Product.objects.create(category=cat, name_uz=name, name_ru=name)
+    v = ProductVariant(
+        product=prod,
+        purchase_price=Decimal(purchase),
+        list_price=Decimal(list_price),
+        stock_qty=0,
+    )
+    v.save()
+    from inventory.models import InventoryMovement
+    from inventory.services import apply_movement
+
+    apply_movement(
+        variant=v,
+        qty_delta=stock,
+        movement_type=InventoryMovement.Type.IN,
+        user=cashier,
+        note="",
+    )
+    v.refresh_from_db()
+    return v
+
+
+@pytest.mark.django_db
+def test_debt_created_on_debt_payment(cashier, customer):
+    v = _mk_variant(cashier, name="P")
+    key = str(uuid.uuid4())
+    sale = complete_sale(
+        idempotency_key=key,
+        cashier=cashier,
+        lines=[{"variant_id": str(v.id), "qty": 1, "line_discount": "0"}],
+        payments=[
+            {"method": "CASH", "amount": "50.00"},
+            {"method": "DEBT", "amount": "50.00"},
+        ],
+        customer={
+            "name": customer.name,
+            "phone_normalized": customer.phone_normalized,
+        },
+    )
+    d = Debt.objects.get(originating_sale=sale)
+    assert d.remaining_amount == Decimal("50.00")
+    record_debt_payment(customer=customer, amount=Decimal("20.00"), user=cashier)
+    d.refresh_from_db()
+    assert d.paid_amount == Decimal("20.00")
+    assert d.remaining_amount == Decimal("30.00")
+
+
+@pytest.mark.django_db
+def test_debt_fifo_across_multiple_sales(cashier, customer):
+    v = _mk_variant(cashier, name="P2", stock=20)
+    s1 = complete_sale(
+        idempotency_key=str(uuid.uuid4()),
+        cashier=cashier,
+        lines=[{"variant_id": str(v.id), "qty": 1, "line_discount": "0"}],
+        payments=[{"method": "DEBT", "amount": "100.00"}],
+        customer={"name": customer.name, "phone_normalized": customer.phone_normalized},
+    )
+    s2 = complete_sale(
+        idempotency_key=str(uuid.uuid4()),
+        cashier=cashier,
+        lines=[{"variant_id": str(v.id), "qty": 1, "line_discount": "0"}],
+        payments=[{"method": "DEBT", "amount": "100.00"}],
+        customer={"name": customer.name, "phone_normalized": customer.phone_normalized},
+    )
+
+    d1 = Debt.objects.get(originating_sale=s1)
+    d2 = Debt.objects.get(originating_sale=s2)
+    assert d1.created_at <= d2.created_at
+
+    touched = record_debt_payment(customer=customer, amount=Decimal("130.00"), user=cashier)
+    d1.refresh_from_db()
+    d2.refresh_from_db()
+
+    assert [d.id for d in touched] == [d1.id, d2.id]
+    assert d1.status == Debt.Status.PAID
+    assert d1.remaining_amount == Decimal("0.00")
+    assert d2.status == Debt.Status.OPEN
+    assert d2.remaining_amount == Decimal("70.00")
+
+
+@pytest.mark.django_db
+def test_debt_payment_history_persisted(cashier, customer):
+    v = _mk_variant(cashier, name="PHist", stock=10)
+    complete_sale(
+        idempotency_key=str(uuid.uuid4()),
+        cashier=cashier,
+        lines=[{"variant_id": str(v.id), "qty": 1, "line_discount": "0"}],
+        payments=[{"method": "DEBT", "amount": "100.00"}],
+        customer={"name": customer.name, "phone_normalized": customer.phone_normalized},
+    )
+    record_debt_payment(
+        customer=customer,
+        amount=Decimal("40.00"),
+        user=cashier,
+        method="CASH",
+        note="qisman",
+    )
+    record_debt_payment(
+        customer=customer,
+        amount=Decimal("25.00"),
+        user=cashier,
+        method="CARD",
+        card_bank="MBANK",
+    )
+    payments = list(DebtPayment.objects.filter(customer=customer).order_by("created_at"))
+    assert len(payments) == 2
+    assert payments[0].amount == Decimal("40.00")
+    assert payments[0].method == DebtPayment.Method.CASH
+    assert payments[0].note == "qisman"
+    assert payments[0].recorded_by_id == cashier.id
+    assert payments[1].amount == Decimal("25.00")
+    assert payments[1].method == DebtPayment.Method.CARD
+    assert payments[1].card_bank == "MBANK"
+    allocs = DebtPaymentAllocation.objects.filter(payment=payments[0])
+    assert allocs.count() == 1
+    assert allocs.first().amount == Decimal("40.00")
+
+
+@pytest.mark.django_db
+def test_debt_payment_overpay_rejected(cashier, customer):
+    v = _mk_variant(cashier, name="P3")
+    s = complete_sale(
+        idempotency_key=str(uuid.uuid4()),
+        cashier=cashier,
+        lines=[{"variant_id": str(v.id), "qty": 1, "line_discount": "0"}],
+        payments=[{"method": "DEBT", "amount": "100.00"}],
+        customer={"name": customer.name, "phone_normalized": customer.phone_normalized},
+    )
+    d = Debt.objects.get(originating_sale=s)
+    with pytest.raises(DebtPolicyError):
+        record_debt_payment(customer=customer, amount=Decimal("1000.00"), user=cashier)
+    d.refresh_from_db()
+    assert d.remaining_amount == Decimal("100.00")

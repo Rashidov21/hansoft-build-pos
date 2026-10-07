@@ -1,0 +1,24 @@
+{
+  "name": "geeks_pos",
+  "private": true,
+  "scripts": {
+    "dev:api": "python backend/run_waitress.py",
+    "dev:web": "npm run dev --prefix frontend",
+    "dev": "concurrently -k \"npm run dev:api\" \"npm run dev:web\"",
+    "build": "npm run build --prefix frontend",
+    "clean:artifacts": "powershell -ExecutionPolicy Bypass -File scripts/clean-build-artifacts.ps1",
+    "build:production": "powershell -ExecutionPolicy Bypass -File scripts/build-production.ps1",
+    "build:production:fast": "powershell -ExecutionPolicy Bypass -File scripts/build-production.ps1 -SkipClean -SkipNpmInstall",
+    "version:sync": "powershell -ExecutionPolicy Bypass -File scripts/sync-version.ps1 -IncrementBuild",
+    "version:bump:patch": "powershell -ExecutionPolicy Bypass -File scripts/bump-version.ps1 -Part patch",
+    "version:bump:minor": "powershell -ExecutionPolicy Bypass -File scripts/bump-version.ps1 -Part minor",
+    "version:bump:major": "powershell -ExecutionPolicy Bypass -File scripts/bump-version.ps1 -Part major",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^1.6.3",
+    "concurrently": "^9.1.0"
+  }
+}

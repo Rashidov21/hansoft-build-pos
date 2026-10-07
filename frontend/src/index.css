@@ -1,0 +1,394 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root,
+  html.theme-dark {
+    /* Tailwind slate (dark UI) */
+    --c-slate-50: 248 250 252;
+    --c-slate-100: 241 245 249;
+    --c-slate-200: 226 232 240;
+    --c-slate-300: 203 213 225;
+    --c-slate-400: 148 163 184;
+    --c-slate-500: 100 116 139;
+    --c-slate-600: 71 85 105;
+    --c-slate-700: 51 65 85;
+    --c-slate-800: 30 41 59;
+    --c-slate-900: 15 23 42;
+    --c-slate-950: 2 6 23;
+    --app-scroll-thumb: 71 85 105;
+    --app-scroll-track: 15 23 42;
+  }
+
+  html.theme-light {
+    /* Inverted slate so existing dark-oriented utilities read as a light theme */
+    --c-slate-50: 15 23 42;
+    --c-slate-100: 30 41 59;
+    --c-slate-200: 51 65 85;
+    --c-slate-300: 71 85 105;
+    --c-slate-400: 100 116 139;
+    --c-slate-500: 100 116 139;
+    --c-slate-600: 148 163 184;
+    --c-slate-700: 203 213 225;
+    --c-slate-800: 226 232 240;
+    --c-slate-900: 241 245 249;
+    --c-slate-950: 248 250 252;
+    --app-scroll-thumb: 148 163 184;
+    --app-scroll-track: 241 245 249;
+  }
+
+  html {
+    font-size: clamp(14px, calc(14px + (100vw - 1024px) * 2 / 342), 16px);
+    --sidebar-width: 16rem;
+    /* Kiosk design tokens (rem = relative to html font-size) */
+    --kiosk-touch: 3rem; /* 48px @ 16px, 42px @ 14px — enforced via min() below */
+    --kiosk-gap: 0.5rem;
+    --kiosk-pad: 0.5rem;
+    --kiosk-text-sm: 0.857rem; /* ~12px @ 14px base */
+    --kiosk-text: 1rem;
+    --kiosk-text-lg: 1.143rem;
+    background-color: rgb(var(--c-slate-950));
+    color: rgb(var(--c-slate-100));
+  }
+
+  html.sidebar-collapsed {
+    --sidebar-width: 6rem;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    min-height: max(3rem, 48px);
+  }
+
+  /*
+   * Light theme: page-level text-white becomes body text color.
+   * Solid accent buttons keep white labels.
+   */
+  html.theme-light .text-white {
+    color: rgb(var(--c-slate-100));
+  }
+
+  html.theme-light .bg-emerald-500,
+  html.theme-light .bg-emerald-600,
+  html.theme-light .bg-emerald-700,
+  html.theme-light .bg-emerald-800,
+  html.theme-light .bg-red-500,
+  html.theme-light .bg-red-600,
+  html.theme-light .bg-red-700,
+  html.theme-light .bg-red-800,
+  html.theme-light .bg-rose-500,
+  html.theme-light .bg-rose-600,
+  html.theme-light .bg-rose-700,
+  html.theme-light .bg-indigo-500,
+  html.theme-light .bg-indigo-600,
+  html.theme-light .bg-indigo-700,
+  html.theme-light .bg-sky-500,
+  html.theme-light .bg-sky-600,
+  html.theme-light .bg-sky-700,
+  html.theme-light .bg-amber-500,
+  html.theme-light .bg-amber-600,
+  html.theme-light .bg-amber-700,
+  html.theme-light .bg-amber-800,
+  html.theme-light .bg-orange-500,
+  html.theme-light .bg-orange-600,
+  html.theme-light .bg-green-500,
+  html.theme-light .bg-green-600,
+  html.theme-light .bg-green-700,
+  html.theme-light .bg-emerald-500 .text-white,
+  html.theme-light .bg-emerald-600 .text-white,
+  html.theme-light .bg-emerald-700 .text-white,
+  html.theme-light .bg-emerald-800 .text-white,
+  html.theme-light .bg-red-600 .text-white,
+  html.theme-light .bg-red-700 .text-white,
+  html.theme-light .bg-rose-600 .text-white,
+  html.theme-light .bg-indigo-600 .text-white,
+  html.theme-light .bg-sky-600 .text-white,
+  html.theme-light .bg-amber-600 .text-white,
+  html.theme-light .bg-amber-700 .text-white,
+  html.theme-light .bg-amber-800 .text-white,
+  html.theme-light .bg-green-600 .text-white {
+    color: #fff;
+  }
+
+  /*
+   * Dark *950 tint chips look washed-out on light pages.
+   * Remap them to soft solid surfaces with dark readable text.
+   */
+  html.theme-light [class*='bg-emerald-900'],
+  html.theme-light [class*='bg-emerald-950'] {
+    background-color: rgb(209 250 229) !important;
+    color: rgb(6 95 70) !important;
+    border-color: rgb(110 231 183) !important;
+  }
+
+  html.theme-light [class*='bg-red-900'],
+  html.theme-light [class*='bg-red-950'] {
+    background-color: rgb(254 226 226) !important;
+    color: rgb(153 27 27) !important;
+    border-color: rgb(252 165 165) !important;
+  }
+
+  html.theme-light [class*='bg-amber-900'],
+  html.theme-light [class*='bg-amber-950'] {
+    background-color: rgb(254 243 199) !important;
+    color: rgb(146 64 14) !important;
+    border-color: rgb(252 211 77) !important;
+  }
+
+  html.theme-light [class*='bg-rose-900'],
+  html.theme-light [class*='bg-rose-950'] {
+    background-color: rgb(255 228 230) !important;
+    color: rgb(159 18 57) !important;
+    border-color: rgb(253 164 175) !important;
+  }
+
+  /* Soft pastel status/hint text was designed for dark panels — darken for light theme */
+  html.theme-light [class*='text-emerald-50'],
+  html.theme-light [class*='text-emerald-100'],
+  html.theme-light [class*='text-emerald-200'],
+  html.theme-light [class*='text-emerald-300'],
+  html.theme-light [class*='text-emerald-400'] {
+    color: rgb(4 120 87);
+  }
+
+  html.theme-light [class*='text-amber-100'],
+  html.theme-light [class*='text-amber-200'],
+  html.theme-light [class*='text-amber-300'],
+  html.theme-light [class*='text-amber-400'] {
+    color: rgb(180 83 9);
+  }
+
+  html.theme-light [class*='text-red-200'],
+  html.theme-light [class*='text-red-300'],
+  html.theme-light [class*='text-red-400'] {
+    color: rgb(185 28 28);
+  }
+
+  html.theme-light [class*='text-sky-200'],
+  html.theme-light [class*='text-sky-300'],
+  html.theme-light [class*='text-sky-400'] {
+    color: rgb(3 105 161);
+  }
+
+  html.theme-light [class*='text-rose-200'],
+  html.theme-light [class*='text-rose-300'],
+  html.theme-light [class*='text-rose-400'] {
+    color: rgb(190 18 60);
+  }
+
+  html.theme-light [class*='text-indigo-200'],
+  html.theme-light [class*='text-indigo-300'],
+  html.theme-light [class*='text-indigo-400'] {
+    color: rgb(67 56 202);
+  }
+
+  /* Soft chips: keep matching pastel text dark/readable */
+  html.theme-light [class*='bg-emerald-900'][class*='text-'],
+  html.theme-light [class*='bg-emerald-950'][class*='text-'] {
+    color: rgb(6 95 70) !important;
+  }
+
+  html.theme-light [class*='bg-red-900'][class*='text-'],
+  html.theme-light [class*='bg-red-950'][class*='text-'] {
+    color: rgb(153 27 27) !important;
+  }
+
+  html.theme-light [class*='bg-amber-900'][class*='text-'],
+  html.theme-light [class*='bg-amber-950'][class*='text-'] {
+    color: rgb(146 64 14) !important;
+  }
+
+  html.theme-light [class*='bg-rose-900'][class*='text-'],
+  html.theme-light [class*='bg-rose-950'][class*='text-'] {
+    color: rgb(159 18 57) !important;
+  }
+
+  /* Solid accent buttons still need light secondary labels */
+  html.theme-light .bg-emerald-500 .text-emerald-50,
+  html.theme-light .bg-emerald-600 .text-emerald-50,
+  html.theme-light .bg-emerald-700 .text-emerald-50,
+  html.theme-light .bg-emerald-500 .text-emerald-100,
+  html.theme-light .bg-emerald-600 .text-emerald-100,
+  html.theme-light .bg-emerald-700 .text-emerald-100,
+  html.theme-light .bg-emerald-700 [class*='text-emerald-'] {
+    color: rgb(209 250 229);
+  }
+
+  /* Photo / media panels keep light text on a fixed dark overlay */
+  html.theme-light .theme-on-media,
+  html.theme-light .theme-on-media .text-white {
+    color: #f8fafc;
+  }
+
+  html.theme-light .theme-on-media [class*='text-slate-'] {
+    color: rgb(226 232 240);
+  }
+
+  html.theme-light .theme-on-media .bg-emerald-600,
+  html.theme-light .theme-on-media .bg-emerald-700,
+  html.theme-light .theme-on-media .bg-emerald-600 [class*='text-'],
+  html.theme-light .theme-on-media .bg-emerald-700 [class*='text-'] {
+    color: #fff;
+  }
+}
+
+@layer components {
+  .touch-btn {
+    @apply min-h-kiosk-touch touch-manipulation transition-transform duration-100 active:scale-[0.98] active:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60;
+  }
+
+  .kiosk-label {
+    font-size: var(--kiosk-text-sm);
+    line-height: 1.25;
+  }
+
+  .kiosk-body {
+    font-size: var(--kiosk-text);
+    line-height: 1.35;
+  }
+}
+
+html,
+body,
+#root {
+  min-height: 100dvh;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background-color: rgb(var(--c-slate-950));
+  color: rgb(var(--c-slate-100));
+}
+
+/* 1024×768 monoblok: 14px base, 48px touch, ixcham bo'shliq */
+@media (max-width: 1365px) {
+  html {
+    font-size: 14px;
+    --kiosk-gap: 0.375rem;
+    --kiosk-pad: 0.375rem;
+  }
+}
+
+@media (max-width: 1365px) and (max-height: 800px) {
+  html.kiosk-mode {
+    --kiosk-gap: 0.25rem;
+    --kiosk-pad: 0.25rem;
+  }
+}
+
+@layer base {
+  .kiosk-mode,
+  .kiosk-mode body,
+  .kiosk-mode #root {
+    height: 100%;
+    min-height: 100dvh;
+  }
+
+  .kiosk-mode {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .kiosk-mode input,
+  .kiosk-mode textarea,
+  .kiosk-mode [contenteditable='true'],
+  .kiosk-mode .allow-select {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  /* Kiosk: never shrink touch targets below 48px */
+  .kiosk-mode button,
+  .kiosk-mode input,
+  .kiosk-mode select,
+  .kiosk-mode textarea,
+  .kiosk-mode .touch-btn {
+    min-height: max(3rem, 48px);
+  }
+
+  /* Date inputs follow active theme */
+  html.theme-dark input[type='date'] {
+    color-scheme: dark;
+  }
+
+  html.theme-light input[type='date'] {
+    color-scheme: light;
+  }
+
+  html.theme-dark input[type='date']::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 1;
+    filter: invert(1) brightness(1.15);
+  }
+
+  html.theme-light input[type='date']::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 1;
+    filter: none;
+  }
+}
+
+@layer utilities {
+  .kiosk-scrollbar {
+    scrollbar-width: auto;
+    scrollbar-color: rgb(var(--app-scroll-thumb)) rgb(var(--app-scroll-track));
+  }
+
+  .kiosk-scrollbar::-webkit-scrollbar {
+    width: 14px;
+    height: 14px;
+  }
+
+  @media (max-width: 1365px) {
+    .kiosk-scrollbar {
+      scrollbar-width: thin;
+    }
+
+    .kiosk-scrollbar::-webkit-scrollbar {
+      width: 10px;
+      height: 10px;
+    }
+
+    .pos-page-compact .pos-queue-strip {
+      padding-top: var(--kiosk-pad);
+      padding-bottom: var(--kiosk-pad);
+      margin-top: var(--kiosk-gap);
+    }
+  }
+
+  .kiosk-scrollbar::-webkit-scrollbar-thumb {
+    background: rgb(var(--app-scroll-thumb));
+    border-radius: 9999px;
+    border: 3px solid rgb(var(--app-scroll-track));
+  }
+
+  .kiosk-scrollbar::-webkit-scrollbar-track {
+    background: rgb(var(--app-scroll-track));
+  }
+
+  .kiosk-mode .pos-checkout-panel select,
+  .kiosk-mode .pos-checkout-panel .pos-pay-input,
+  .kiosk-mode .pos-checkout-panel .pos-pay-action {
+    min-height: 3rem;
+    height: 3rem;
+    max-height: 3rem;
+  }
+
+  .kiosk-mode .pos-checkout-panel .pos-pay-action {
+    min-width: 3rem;
+    width: 3rem;
+  }
+
+  .kiosk-mode .pos-checkout-panel select {
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+    line-height: 1.25;
+  }
+}

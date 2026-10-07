@@ -1,0 +1,74 @@
+{
+  "build": {
+    "beforeBuildCommand": "npm run build --prefix frontend",
+    "beforeDevCommand": "npm run dev --prefix frontend",
+    "devPath": "http://localhost:5173",
+    "distDir": "../frontend/dist"
+  },
+  "tauri": {
+    "allowlist": {
+      "http": {
+        "request": true,
+        "scope": [
+          "http://127.0.0.1/**",
+          "http://localhost/**",
+          "https://tauri.localhost/**"
+        ]
+      },
+      "shell": {
+        "open": true
+      },
+      "window": {
+        "all": true
+      }
+    },
+    "bundle": {
+      "active": true,
+      "category": "Business",
+      "copyright": "",
+      "identifier": "uz.geeks.pos",
+      "externalBin": [
+        "bin/geeks_pos_backend"
+      ],
+      "icon": [
+        "icons/icon.ico",
+        "icons/resized-logo.png",
+        "icons/resized-logo (1).png",
+        "icons/resized-logo (2).png"
+      ],
+      "longDescription": "Hansoft POS - asal va ari mahsulotlari do'koni uchun savdo tizimi",
+      "shortDescription": "Hansoft POS",
+      "targets": "all",
+      "windows": {
+        "certificateThumbprint": null,
+        "digestAlgorithm": "sha256",
+        "timestampUrl": "",
+        "webviewInstallMode": {
+          "type": "downloadBootstrapper"
+        }
+      }
+    },
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:* https://tauri.localhost https://www.google.com https://1.1.1.1 https://www.gstatic.com 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:"
+    },
+    "updater": {
+      "active": false
+    },
+    "windows": [
+      {
+        "alwaysOnTop": false,
+        "decorations": false,
+        "fullscreen": false,
+        "maximized": true,
+        "height": 768,
+        "resizable": true,
+        "title": "Hansoft POS",
+        "width": 1024,
+        "minWidth": 800,
+        "minHeight": 600,
+        "hiddenTitle": false,
+        "center": true
+      }
+    ]
+  }
+}

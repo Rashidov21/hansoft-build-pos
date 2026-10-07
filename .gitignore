@@ -1,0 +1,35 @@
+# Node / frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/public/build-info.json
+
+# Python / backend
+backend/db.sqlite3
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Backend build outputs
+backend/dist/
+backend/build/
+backend/geeks_pos_backend
+
+# Versioned release copies (built by scripts/stage-release-artifacts.ps1)
+dist/releases/*
+!dist/releases/.gitkeep
+
+# Rust / Tauri build outputs
+src-tauri/target/
+# Packaged sidecar copies (optional); keep .gitkeep
+src-tauri/bin/*
+!src-tauri/bin/.gitkeep
+
+# Local env / logs
+.env
+*.log
+
+_backup/*
