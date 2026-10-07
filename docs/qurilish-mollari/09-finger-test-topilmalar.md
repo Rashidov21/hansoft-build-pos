@@ -147,7 +147,7 @@ Jiddiylik: **P0** bloklovchi / chalkashlik yuqori · **P1** layout/visual buzili
 
 1. ✅ **S1** — `shiftStatusLoaded`: yopiq smena «Yuklanmoqda» emas, «Smena yopiq».  
 2. ✅ **P1** — `defaultSaleQty` → `1` (step 0.1 saqlanadi).  
-3. ✅ **L3** — Kirish PIN &lt; 4 bo‘lsa disabled.  
+3. ✅ **L3** — Kirish PIN 4 xonadan kam bo‘lsa disabled.  
 4. ✅ **G2** — Sozlamalar sidebar footer da; admin menyuda Ombor birlashtirildi (stock alohida yo‘q).  
 5. ✅ **I1+I6** — `WarehousePage`: Qoldiq | Kirim/tuzatish tablar.  
 6. ✅ **P3** — F1/F2/F3 doim yorliq bilan (Naqd/Karta/Nasiya).  
