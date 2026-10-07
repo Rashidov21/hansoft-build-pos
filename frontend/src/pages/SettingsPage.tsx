@@ -2,13 +2,22 @@ import { useEffect, useMemo, useState } from 'react'
 import { Building2, HardDriveDownload, Printer, ScanLine, ShieldCheck, Bot, Cog, Users } from 'lucide-react'
 import {
   activateLicense,
+  createReportChannel,
+  deleteReportChannel,
   fetchLicenseStatus,
   fetchPinUsers,
+  fetchReportChannels,
+  fetchReportRoutes,
+  sendLowStockReport,
   setUserPin,
   testReceiptPrintPayload,
+  updateReportChannel,
+  updateReportRoute,
   type IntegrationSettings,
   type LicenseStatus,
   type PinUser,
+  type ReportChannel,
+  type ReportRoute,
   type StocktakeSession,
   type StoreSettings,
 } from '../api'
@@ -132,9 +141,18 @@ export function SettingsPage({
     primary_report_channel: integrations?.primary_report_channel ?? 'both',
     report_lang: integrations?.report_lang ?? '',
     auto_daily_z_report_enabled: integrations?.auto_daily_z_report_enabled ?? true,
+    auto_low_stock_report_enabled: integrations?.auto_low_stock_report_enabled ?? true,
     telegram_db_backup_interval_days: integrations?.telegram_db_backup_interval_days ?? 3,
     auto_debt_whatsapp_reminder_enabled: integrations?.auto_debt_whatsapp_reminder_enabled ?? true,
   })
+  const [reportChannels, setReportChannels] = useState<ReportChannel[]>([])
+  const [reportRoutes, setReportRoutes] = useState<ReportRoute[]>([])
+  const [channelDraft, setChannelDraft] = useState({
+    name: '',
+    kind: 'telegram' as 'telegram' | 'whatsapp',
+    address: '',
+  })
+  const [routingBusy, setRoutingBusy] = useState(false)
 
   useEffect(() => {
     setForm({
@@ -199,10 +217,27 @@ export function SettingsPage({
       primary_report_channel: integrations?.primary_report_channel ?? 'both',
       report_lang: integrations?.report_lang ?? '',
       auto_daily_z_report_enabled: integrations?.auto_daily_z_report_enabled ?? true,
+      auto_low_stock_report_enabled: integrations?.auto_low_stock_report_enabled ?? true,
       telegram_db_backup_interval_days: (integrations?.telegram_db_backup_interval_days ?? 3) as 0 | 1 | 3,
       auto_debt_whatsapp_reminder_enabled: integrations?.auto_debt_whatsapp_reminder_enabled ?? true,
     })
   }, [integrations])
+
+  const reloadReportRouting = async () => {
+    try {
+      const [chs, routes] = await Promise.all([fetchReportChannels(), fetchReportRoutes()])
+      setReportChannels(chs)
+      setReportRoutes(routes)
+    } catch {
+      setReportChannels([])
+      setReportRoutes([])
+    }
+  }
+
+  useEffect(() => {
+    if (activeTab !== 'bots') return
+    void reloadReportRouting()
+  }, [activeTab])
 
   useEffect(() => {
     void (async () => {
@@ -861,6 +896,7 @@ export function SettingsPage({
               onChange={(e) => setIntegrationForm((p) => ({ ...p, telegram_chat_id: e.target.value }))}
               placeholder={t('admin.bots.telegramChatId')}
             />
+            <p className="text-xs text-slate-500">{t('admin.bots.telegramChatIdHelp')}</p>
             <label className="block text-xs text-slate-400">{t('admin.bots.reportLang')}</label>
             <select
               className="touch-btn min-h-12 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700"
@@ -892,6 +928,21 @@ export function SettingsPage({
               <span className="text-sm text-slate-200">{t('admin.bots.autoDailyZ')}</span>
             </label>
             <p className="text-xs text-slate-500">{t('admin.bots.autoDailyZHelp')}</p>
+            <label className="flex items-center gap-3 touch-btn min-h-12 cursor-pointer">
+              <input
+                type="checkbox"
+                className="h-5 w-5 rounded border-slate-600"
+                checked={integrationForm.auto_low_stock_report_enabled !== false}
+                onChange={(e) =>
+                  setIntegrationForm((p) => ({
+                    ...p,
+                    auto_low_stock_report_enabled: e.target.checked,
+                  }))
+                }
+              />
+              <span className="text-sm text-slate-200">{t('admin.bots.autoLowStock')}</span>
+            </label>
+            <p className="text-xs text-slate-500">{t('admin.bots.autoLowStockHelp')}</p>
             <label className="block text-xs text-slate-400">{t('admin.bots.telegramDbBackup')}</label>
             <select
               className="touch-btn min-h-12 w-full px-3 py-2 rounded bg-slate-950 border border-slate-700"
@@ -1018,6 +1069,197 @@ export function SettingsPage({
             </p>
           </div>
           </div>
+
+          <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4 space-y-3">
+            <h3 className="font-medium">{t('admin.bots.reportChannels')}</h3>
+            <p className="text-xs text-slate-500">{t('admin.bots.reportChannelsHelp')}</p>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+              <input
+                className="touch-btn min-h-12 px-3 py-2 rounded bg-slate-950 border border-slate-700 md:col-span-1"
+                placeholder={t('admin.bots.channelName')}
+                value={channelDraft.name}
+                onChange={(e) => setChannelDraft((p) => ({ ...p, name: e.target.value }))}
+              />
+              <select
+                className="touch-btn min-h-12 px-3 py-2 rounded bg-slate-950 border border-slate-700"
+                value={channelDraft.kind}
+                onChange={(e) =>
+                  setChannelDraft((p) => ({
+                    ...p,
+                    kind: e.target.value as 'telegram' | 'whatsapp',
+                  }))
+                }
+              >
+                <option value="telegram">Telegram</option>
+                <option value="whatsapp">WhatsApp</option>
+              </select>
+              <input
+                className="touch-btn min-h-12 px-3 py-2 rounded bg-slate-950 border border-slate-700 md:col-span-1"
+                placeholder={t('admin.bots.channelAddress')}
+                value={channelDraft.address}
+                onChange={(e) => setChannelDraft((p) => ({ ...p, address: e.target.value }))}
+              />
+              <button
+                type="button"
+                disabled={routingBusy || !channelDraft.name.trim() || !channelDraft.address.trim()}
+                className="touch-btn min-h-12 px-3 rounded bg-slate-800 border border-slate-600 disabled:opacity-40"
+                onClick={async () => {
+                  setRoutingBusy(true)
+                  try {
+                    await createReportChannel({
+                      name: channelDraft.name.trim(),
+                      kind: channelDraft.kind,
+                      address: channelDraft.address.trim(),
+                      is_active: true,
+                    })
+                    setChannelDraft({ name: '', kind: 'telegram', address: '' })
+                    await reloadReportRouting()
+                    setActionToast({ kind: 'ok', message: t('admin.bots.channelSaved') })
+                  } catch {
+                    setActionToast({ kind: 'err', message: t('msg.errorGeneric') })
+                  } finally {
+                    setRoutingBusy(false)
+                  }
+                }}
+              >
+                {t('admin.bots.addChannel')}
+              </button>
+            </div>
+            <div className="space-y-2">
+              {reportChannels.length === 0 && (
+                <p className="text-sm text-slate-500">{t('admin.bots.noChannels')}</p>
+              )}
+              {reportChannels.map((ch) => (
+                <div
+                  key={ch.id}
+                  className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2"
+                >
+                  <span className="text-sm font-medium text-slate-100 min-w-[8rem]">{ch.name}</span>
+                  <span className="text-xs uppercase text-slate-400">{ch.kind}</span>
+                  <span className="text-sm text-slate-300 font-mono flex-1 break-all">{ch.address}</span>
+                  <label className="flex items-center gap-2 text-xs text-slate-300">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-slate-600"
+                      checked={ch.is_active}
+                      onChange={async (e) => {
+                        setRoutingBusy(true)
+                        try {
+                          await updateReportChannel(ch.id, { is_active: e.target.checked })
+                          await reloadReportRouting()
+                        } catch {
+                          setActionToast({ kind: 'err', message: t('msg.errorGeneric') })
+                        } finally {
+                          setRoutingBusy(false)
+                        }
+                      }}
+                    />
+                    {t('admin.bots.channelActive')}
+                  </label>
+                  <button
+                    type="button"
+                    disabled={routingBusy}
+                    className="touch-btn min-h-10 px-3 rounded border border-rose-700/60 text-rose-300 text-sm disabled:opacity-40"
+                    onClick={async () => {
+                      setRoutingBusy(true)
+                      try {
+                        await deleteReportChannel(ch.id)
+                        await reloadReportRouting()
+                      } catch {
+                        setActionToast({ kind: 'err', message: t('msg.errorGeneric') })
+                      } finally {
+                        setRoutingBusy(false)
+                      }
+                    }}
+                  >
+                    {t('admin.bots.deleteChannel')}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4 space-y-3">
+            <h3 className="font-medium">{t('admin.bots.reportRoutes')}</h3>
+            <p className="text-xs text-slate-500">{t('admin.bots.reportRoutesHelp')}</p>
+            {reportRoutes.map((route) => {
+              const selected = new Set(route.channels.map((c) => c.id))
+              const typeLabel =
+                route.report_type === 'daily_z'
+                  ? t('admin.bots.routeDailyZ')
+                  : route.report_type === 'low_stock'
+                    ? t('admin.bots.routeLowStock')
+                    : t('admin.bots.routeDbBackup')
+              return (
+                <div key={route.id} className="rounded-xl border border-slate-700 bg-slate-950/50 p-3 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium text-slate-100">{typeLabel}</span>
+                    <label className="flex items-center gap-2 text-sm text-slate-300">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-slate-600"
+                        checked={route.enabled}
+                        onChange={async (e) => {
+                          setRoutingBusy(true)
+                          try {
+                            await updateReportRoute(route.id, { enabled: e.target.checked })
+                            await reloadReportRouting()
+                          } catch {
+                            setActionToast({ kind: 'err', message: t('msg.errorGeneric') })
+                          } finally {
+                            setRoutingBusy(false)
+                          }
+                        }}
+                      />
+                      {t('admin.bots.routeEnabled')}
+                    </label>
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    {reportChannels.map((ch) => {
+                      const disabledForBackup =
+                        route.report_type === 'db_backup' && ch.kind !== 'telegram'
+                      return (
+                        <label
+                          key={`${route.id}-${ch.id}`}
+                          className={`flex items-center gap-2 text-sm ${
+                            disabledForBackup ? 'text-slate-600' : 'text-slate-200'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded border-slate-600"
+                            disabled={disabledForBackup || routingBusy}
+                            checked={selected.has(ch.id)}
+                            onChange={async (e) => {
+                              const next = new Set(selected)
+                              if (e.target.checked) next.add(ch.id)
+                              else next.delete(ch.id)
+                              setRoutingBusy(true)
+                              try {
+                                await updateReportRoute(route.id, {
+                                  channel_ids: Array.from(next),
+                                })
+                                await reloadReportRouting()
+                              } catch {
+                                setActionToast({ kind: 'err', message: t('msg.errorGeneric') })
+                              } finally {
+                                setRoutingBusy(false)
+                              }
+                            }}
+                          />
+                          {ch.name}
+                        </label>
+                      )
+                    })}
+                    {reportChannels.length === 0 && (
+                      <span className="text-xs text-slate-500">{t('admin.bots.noChannels')}</span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -1027,6 +1269,7 @@ export function SettingsPage({
                 setBusy(true)
                 try {
                   await runAction(t('admin.bots.save'), () => onSaveIntegrations(integrationForm))
+                  await reloadReportRouting()
                 } finally {
                   setBusy(false)
                 }
@@ -1048,6 +1291,21 @@ export function SettingsPage({
               }}
             >
               {t('admin.bots.sendZReport')}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              className="touch-btn min-h-12 px-4 py-2 rounded bg-slate-800 border border-slate-700 disabled:opacity-40"
+              onClick={async () => {
+                setBusy(true)
+                try {
+                  await runAction(t('admin.bots.sendLowStock'), () => sendLowStockReport())
+                } finally {
+                  setBusy(false)
+                }
+              }}
+            >
+              {t('admin.bots.sendLowStock')}
             </button>
           </div>
         </div>

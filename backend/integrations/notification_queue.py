@@ -16,6 +16,11 @@ def _sync_event_type(kind: str) -> str:
         NotificationQueue.Kind.Z_REPORT_WHATSAPP,
     ):
         return "z_report_sync"
+    if kind in (
+        NotificationQueue.Kind.LOW_STOCK_TELEGRAM,
+        NotificationQueue.Kind.LOW_STOCK_WHATSAPP,
+    ):
+        return "low_stock_sync"
     if kind == NotificationQueue.Kind.WHATSAPP_DEBT_REMINDER:
         return "debt_reminder_sync"
     return "integration_sync"
@@ -56,18 +61,34 @@ def flush_pending(*, limit: int = 50) -> dict[str, Any]:
 
         from .services import (
             _send_telegram_text,
+            _send_telegram_text_to,
             _send_whatsapp_debt_reminder_now,
             _send_whatsapp_text,
+            _send_whatsapp_text_to,
         )
 
         settings = IntegrationSettings.get_solo()
         try:
-            if row.kind == NotificationQueue.Kind.Z_REPORT_TELEGRAM:
+            if row.kind in (
+                NotificationQueue.Kind.Z_REPORT_TELEGRAM,
+                NotificationQueue.Kind.LOW_STOCK_TELEGRAM,
+            ):
                 text = str(row.payload.get("text") or "")
-                _send_telegram_text(settings=settings, text=text)
-            elif row.kind == NotificationQueue.Kind.Z_REPORT_WHATSAPP:
+                chat_id = str(row.payload.get("chat_id") or "").strip()
+                if chat_id:
+                    _send_telegram_text_to(settings=settings, chat_id=chat_id, text=text)
+                else:
+                    _send_telegram_text(settings=settings, text=text)
+            elif row.kind in (
+                NotificationQueue.Kind.Z_REPORT_WHATSAPP,
+                NotificationQueue.Kind.LOW_STOCK_WHATSAPP,
+            ):
                 text = str(row.payload.get("text") or "")
-                _send_whatsapp_text(settings=settings, text=text)
+                address = str(row.payload.get("address") or "").strip()
+                if address:
+                    _send_whatsapp_text_to(settings=settings, address=address, text=text)
+                else:
+                    _send_whatsapp_text(settings=settings, text=text)
             elif row.kind == NotificationQueue.Kind.WHATSAPP_DEBT_REMINDER:
                 _send_whatsapp_debt_reminder_now(
                     settings=settings,

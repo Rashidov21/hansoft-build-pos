@@ -471,7 +471,7 @@ $backend = '{sidecar_str}'
 $logDir = Join-Path $appHome 'logs'
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $logFile = Join-Path $logDir 'backend_boot.log'
-$bindHost = if ($env:GEEKS_POS_BIND_HOST) { $env:GEEKS_POS_BIND_HOST } else { '127.0.0.1' }
+$bindHost = if ($env:GEEKS_POS_BIND_HOST) {{ $env:GEEKS_POS_BIND_HOST }} else {{ '127.0.0.1' }}
 Start-Process -FilePath $backend -ArgumentList @('--host',$bindHost,'--port',$port,'--threads','2') -WindowStyle Hidden -RedirectStandardOutput $logFile -RedirectStandardError $logFile
 exit 0
 "#
@@ -489,8 +489,7 @@ fn ensure_backend_logon_task(app: &tauri::AppHandle) {
         append_log_line("INFO", "backend_logon_task_skipped_disabled_by_env");
         return;
     }
-    #[cfg(debug_assertions)]
-    {
+    if cfg!(debug_assertions) {
         append_log_line("INFO", "backend_logon_task_skipped_dev_build");
         return;
     }

@@ -328,27 +328,54 @@ def _build_z_report_whatsapp_text(*, metrics: dict, lang: str) -> str:
     )
 
 
+def _telegram_token_ready(settings: IntegrationSettings) -> bool:
+    return bool((settings.telegram_bot_token or "").strip())
+
+
 def _telegram_ready(settings: IntegrationSettings) -> bool:
-    return bool(settings.telegram_bot_token and settings.telegram_chat_id)
+    """Legacy: token + default chat_id (or any Telegram ReportChannel)."""
+    if not _telegram_token_ready(settings):
+        return False
+    if (settings.telegram_chat_id or "").strip():
+        return True
+    from .models import ReportChannel
+
+    return ReportChannel.objects.filter(
+        kind=ReportChannel.Kind.TELEGRAM, is_active=True
+    ).exists()
 
 
-def _whatsapp_ready(settings: IntegrationSettings) -> bool:
+def _whatsapp_provider_ready(settings: IntegrationSettings) -> bool:
     if settings.whatsapp_provider == IntegrationSettings.WhatsAppProvider.GREEN_API:
         return bool(
             settings.whatsapp_api_base
             and settings.greenapi_instance_id
             and settings.greenapi_api_token_instance
-            and settings.whatsapp_sender
         )
-    return bool(settings.whatsapp_api_base and settings.whatsapp_api_token and settings.whatsapp_sender)
+    return bool(settings.whatsapp_api_base and settings.whatsapp_api_token)
 
 
-def _send_telegram_text(*, settings: IntegrationSettings, text: str):
-    if not _telegram_ready(settings):
+def _whatsapp_ready(settings: IntegrationSettings) -> bool:
+    if not _whatsapp_provider_ready(settings):
+        return False
+    if (settings.whatsapp_sender or "").strip():
+        return True
+    from .models import ReportChannel
+
+    return ReportChannel.objects.filter(
+        kind=ReportChannel.Kind.WHATSAPP, is_active=True
+    ).exists()
+
+
+def _send_telegram_text_to(*, settings: IntegrationSettings, chat_id: str, text: str):
+    if not _telegram_token_ready(settings):
         raise ValueError("Telegram settings are incomplete")
+    cid = (chat_id or "").strip()
+    if not cid:
+        raise ValueError("Telegram chat_id is empty")
     ok, details = _post_json(
         f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage",
-        {"chat_id": settings.telegram_chat_id, "text": text},
+        {"chat_id": cid, "text": text},
         require_ok_field=True,
     )
     if not ok:
@@ -357,9 +384,20 @@ def _send_telegram_text(*, settings: IntegrationSettings, text: str):
     return details
 
 
-def _send_telegram_document(*, settings: IntegrationSettings, file_path: Path, caption: str = ""):
-    if not _telegram_ready(settings):
+def _send_telegram_text(*, settings: IntegrationSettings, text: str):
+    return _send_telegram_text_to(
+        settings=settings, chat_id=settings.telegram_chat_id, text=text
+    )
+
+
+def _send_telegram_document_to(
+    *, settings: IntegrationSettings, chat_id: str, file_path: Path, caption: str = ""
+):
+    if not _telegram_token_ready(settings):
         raise ValueError("Telegram settings are incomplete")
+    cid = (chat_id or "").strip()
+    if not cid:
+        raise ValueError("Telegram chat_id is empty")
     path = Path(file_path)
     if not path.is_file():
         raise ValueError(f"File not found: {path}")
@@ -382,7 +420,7 @@ def _send_telegram_document(*, settings: IntegrationSettings, file_path: Path, c
 
     body = b"\r\n".join(
         [
-            _part("chat_id", str(settings.telegram_chat_id).encode()),
+            _part("chat_id", str(cid).encode()),
             _part("caption", (caption or "")[:900].encode("utf-8")),
             _part(
                 "document",
@@ -418,11 +456,23 @@ def _send_telegram_document(*, settings: IntegrationSettings, file_path: Path, c
         raise NotificationDeliveryError(f"Telegram document failed: {e.reason}", retriable=True)
 
 
-def _send_whatsapp_text(*, settings: IntegrationSettings, text: str):
-    if not _whatsapp_ready(settings):
+def _send_telegram_document(*, settings: IntegrationSettings, file_path: Path, caption: str = ""):
+    return _send_telegram_document_to(
+        settings=settings,
+        chat_id=settings.telegram_chat_id,
+        file_path=file_path,
+        caption=caption,
+    )
+
+
+def _send_whatsapp_text_to(*, settings: IntegrationSettings, address: str, text: str):
+    if not _whatsapp_provider_ready(settings):
         raise ValueError("WhatsApp settings are incomplete")
+    dest = (address or "").strip()
+    if not dest:
+        raise ValueError("WhatsApp address is empty")
     if settings.whatsapp_provider == IntegrationSettings.WhatsAppProvider.GREEN_API:
-        chat_id = settings.whatsapp_sender if "@c.us" in settings.whatsapp_sender else f"{settings.whatsapp_sender}@c.us"
+        chat_id = dest if "@c.us" in dest else f"{dest}@c.us"
         payload = {"chatId": chat_id, "message": text}
         url = (
             settings.whatsapp_api_base.rstrip("/")
@@ -430,7 +480,7 @@ def _send_whatsapp_text(*, settings: IntegrationSettings, text: str):
         )
         ok, details = _post_json(url, payload)
     else:
-        payload = {"to": settings.whatsapp_sender, "message": text, "sender": settings.whatsapp_sender}
+        payload = {"to": dest, "message": text, "sender": settings.whatsapp_sender or dest}
         ok, details = _post_json(
             settings.whatsapp_api_base.rstrip("/") + "/messages/send",
             payload,
@@ -440,6 +490,12 @@ def _send_whatsapp_text(*, settings: IntegrationSettings, text: str):
         retriable = "HTTP 4" not in details or "HTTP 429" in details
         raise NotificationDeliveryError(f"WhatsApp send failed: {details}", retriable=retriable)
     return details
+
+
+def _send_whatsapp_text(*, settings: IntegrationSettings, text: str):
+    return _send_whatsapp_text_to(
+        settings=settings, address=settings.whatsapp_sender, text=text
+    )
 
 
 def _send_whatsapp_debt_reminder_now(
@@ -624,77 +680,101 @@ def _should_queue_after_whatsapp_error(exc: Exception) -> bool:
 
 
 def send_z_report_multichannel(*, lang: str = "uz", from_date: str | None = None, to_date: str | None = None):
-    from .notification_queue import enqueue
+    from .models import ReportRoute
+    from .report_routing import deliver_text_report, ensure_channels_from_legacy
 
-    settings = IntegrationSettings.get_solo()
+    ensure_channels_from_legacy()
     selected_lang = resolve_report_lang(preferred=lang)
     metrics = sales_metrics(from_date=from_date, to_date=to_date)
     text_telegram = _build_z_report_text(metrics=metrics, lang=selected_lang)
     text_whatsapp = _build_z_report_whatsapp_text(metrics=metrics, lang=selected_lang)
-
-    channel_results: dict[str, dict[str, str | bool]] = {}
-    primary = (settings.primary_report_channel or IntegrationSettings.PrimaryReportChannel.BOTH).lower()
-    use_telegram = _telegram_ready(settings) and primary in (
-        IntegrationSettings.PrimaryReportChannel.TELEGRAM,
-        IntegrationSettings.PrimaryReportChannel.BOTH,
-        "telegram",
-        "both",
+    out = deliver_text_report(
+        report_type=ReportRoute.ReportType.DAILY_Z,
+        text_telegram=text_telegram,
+        text_whatsapp=text_whatsapp,
+        queue_kind_telegram=NotificationQueue.Kind.Z_REPORT_TELEGRAM,
+        queue_kind_whatsapp=NotificationQueue.Kind.Z_REPORT_WHATSAPP,
+        queue_payload_extra={
+            "lang": selected_lang,
+            "from_date": from_date,
+            "to_date": to_date,
+        },
     )
-    use_whatsapp = _whatsapp_ready(settings) and primary in (
-        IntegrationSettings.PrimaryReportChannel.WHATSAPP,
-        IntegrationSettings.PrimaryReportChannel.BOTH,
-        "whatsapp",
-        "both",
+    return {**out, "lang": selected_lang}
+
+
+def _build_low_stock_report_text(*, lang: str) -> str:
+    from catalog.low_stock import get_low_stock_variants
+
+    code = _norm_lang(lang)
+    variants = get_low_stock_variants()
+    if code == "ru":
+        title = "Низкий остаток"
+        empty = "Товаров с низким остатком нет."
+        line_fmt = "{name}: {qty} (порог {thr})"
+    elif code == "uz-cyrl":
+        title = "Кам қолдиқ"
+        empty = "Кам қолдиқли товарлар йўқ."
+        line_fmt = "{name}: {qty} (чегара {thr})"
+    else:
+        title = "Kam qoldiq"
+        empty = "Kam qoldiqli mahsulotlar yo‘q."
+        line_fmt = "{name}: {qty} (chegara {thr})"
+
+    if not variants:
+        return f"{title}\n{empty}"
+
+    lines = [title, ""]
+    for v in variants[:40]:
+        name = (
+            (v.get("product_name_ru") if code == "ru" else v.get("product_name_uz"))
+            or v.get("product_name_uz")
+            or v.get("barcode")
+            or "?"
+        )
+        lines.append(
+            line_fmt.format(
+                name=name,
+                qty=v.get("stock_qty"),
+                thr=v.get("threshold"),
+            )
+        )
+    if len(variants) > 40:
+        lines.append(f"... +{len(variants) - 40}")
+    return "\n".join(lines)
+
+
+def send_low_stock_report(*, lang: str | None = None) -> dict:
+    from .models import ReportRoute
+    from .report_routing import deliver_text_report, ensure_channels_from_legacy
+
+    ensure_channels_from_legacy()
+    selected_lang = resolve_report_lang(preferred=lang)
+    text = _build_low_stock_report_text(lang=selected_lang)
+    out = deliver_text_report(
+        report_type=ReportRoute.ReportType.LOW_STOCK,
+        text_telegram=text,
+        text_whatsapp=text,
+        queue_kind_telegram=NotificationQueue.Kind.LOW_STOCK_TELEGRAM,
+        queue_kind_whatsapp=NotificationQueue.Kind.LOW_STOCK_WHATSAPP,
+        queue_payload_extra={"lang": selected_lang},
     )
-    # If preferred channel not ready, fall back to any ready channel.
-    if not use_telegram and not use_whatsapp:
-        use_telegram = _telegram_ready(settings)
-        use_whatsapp = _whatsapp_ready(settings)
-    if not use_telegram and not use_whatsapp:
-        raise ValueError("No configured notification channels")
+    return {**out, "lang": selected_lang}
 
-    if use_telegram:
-        try:
-            details = _send_telegram_text(settings=settings, text=text_telegram)
-            channel_results["telegram"] = {"ok": True, "details": details, "queued": False}
-        except ValueError as e:
-            msg = str(e)
-            if _should_queue_after_telegram_error(e):
-                enqueue(
-                    NotificationQueue.Kind.Z_REPORT_TELEGRAM,
-                    {
-                        "text": text_telegram,
-                        "lang": selected_lang,
-                        "from_date": from_date,
-                        "to_date": to_date,
-                    },
-                )
-                channel_results["telegram"] = {"ok": True, "details": msg, "queued": True}
-            else:
-                channel_results["telegram"] = {"ok": False, "details": msg, "queued": False}
-    if use_whatsapp:
-        try:
-            details = _send_whatsapp_text(settings=settings, text=text_whatsapp)
-            channel_results["whatsapp"] = {"ok": True, "details": details, "queued": False}
-        except ValueError as e:
-            msg = str(e)
-            if _should_queue_after_whatsapp_error(e):
-                enqueue(
-                    NotificationQueue.Kind.Z_REPORT_WHATSAPP,
-                    {
-                        "text": text_whatsapp,
-                        "lang": selected_lang,
-                        "from_date": from_date,
-                        "to_date": to_date,
-                    },
-                )
-                channel_results["whatsapp"] = {"ok": True, "details": msg, "queued": True}
-            else:
-                channel_results["whatsapp"] = {"ok": False, "details": msg, "queued": False}
 
-    ok = any(v.get("ok") for v in channel_results.values())
-    details = "Sent successfully" if ok else "All channels failed"
-    return {"ok": ok, "details": details, "channel_results": channel_results, "lang": selected_lang}
+def run_auto_daily_low_stock_report_if_due(*, now=None) -> dict:
+    """Daily scheduler hook. Sends low-stock alert at most once per local day."""
+    ref_now = now or timezone.localtime()
+    today = timezone.localdate()
+    settings = IntegrationSettings.get_solo()
+    if not settings.auto_low_stock_report_enabled:
+        return {"ran": False, "reason": "disabled"}
+    if settings.last_auto_low_stock_report_date == today:
+        return {"ran": False, "reason": "already_sent"}
+    out = send_low_stock_report(lang=resolve_report_lang())
+    settings.last_auto_low_stock_report_date = today
+    settings.save(update_fields=["last_auto_low_stock_report_date", "updated_at"])
+    return {"ran": True, "reason": "sent", "result": out, "at": ref_now.isoformat()}
 
 
 def send_whatsapp_reminder(
@@ -801,15 +881,20 @@ def _safe_sqlite_snapshot(dest: Path) -> Path:
 
 def run_telegram_db_backup_if_due(*, now=None, force: bool = False) -> dict:
     """
-    Send SQLite DB file to Telegram owner chat every N days (1 or 3; 0 = off).
+    Send SQLite DB file to Telegram channels on the db_backup route every N days (1 or 3; 0 = off).
     """
+    from .models import ReportRoute
+    from .report_routing import deliver_telegram_document_report, ensure_channels_from_legacy
+
     ref_now = now or timezone.localtime()
     settings = IntegrationSettings.get_solo()
     interval = int(settings.telegram_db_backup_interval_days or 0)
     if not force and interval <= 0:
         return {"ran": False, "reason": "disabled"}
-    if not _telegram_ready(settings):
+    if not _telegram_token_ready(settings):
         return {"ran": False, "reason": "telegram_incomplete"}
+
+    ensure_channels_from_legacy()
 
     if not force and settings.last_telegram_db_backup_at:
         last = timezone.localtime(settings.last_telegram_db_backup_at)
@@ -829,14 +914,26 @@ def run_telegram_db_backup_if_due(*, now=None, force: bool = False) -> dict:
     try:
         _safe_sqlite_snapshot(dest)
         caption = f"DB backup {stamp} ({brand})"
-        details = _send_telegram_document(settings=settings, file_path=dest, caption=caption)
+        sent = deliver_telegram_document_report(
+            report_type=ReportRoute.ReportType.DB_BACKUP,
+            file_path=dest,
+            caption=caption,
+        )
+        if not sent.get("ok"):
+            return {
+                "ran": False,
+                "reason": sent.get("details") or "send_failed",
+                "backup_path": str(dest),
+                "channel_results": sent.get("channel_results"),
+            }
         settings.last_telegram_db_backup_at = ref_now
         settings.save(update_fields=["last_telegram_db_backup_at", "updated_at"])
         return {
             "ran": True,
             "reason": "sent",
             "backup_path": str(dest),
-            "details": details,
+            "details": sent.get("details"),
+            "channel_results": sent.get("channel_results"),
         }
     except Exception as exc:
         return {"ran": False, "reason": str(exc), "backup_path": str(dest) if dest.exists() else None}

@@ -1718,9 +1718,111 @@ export type IntegrationSettings = {
   primary_report_channel?: 'telegram' | 'whatsapp' | 'both'
   report_lang?: '' | 'uz' | 'ru' | 'uz-cyrl'
   auto_daily_z_report_enabled?: boolean
+  auto_low_stock_report_enabled?: boolean
   telegram_db_backup_interval_days?: 0 | 1 | 3
   auto_debt_whatsapp_reminder_enabled?: boolean
   updated_at?: string
+}
+
+export type ReportChannel = {
+  id: string
+  name: string
+  kind: 'telegram' | 'whatsapp'
+  address: string
+  is_active: boolean
+  sort_order: number
+  created_at?: string
+  updated_at?: string
+}
+
+export type ReportRoute = {
+  id: string
+  report_type: 'daily_z' | 'low_stock' | 'db_backup'
+  enabled: boolean
+  channels: ReportChannel[]
+  updated_at?: string
+}
+
+export async function fetchReportChannels(): Promise<ReportChannel[]> {
+  const r = await fetch(`${API}/api/integrations/report-channels/`, { credentials: 'include' })
+  if (!r.ok) throw new Error('FETCH_REPORT_CHANNELS_FAILED')
+  return r.json()
+}
+
+export async function createReportChannel(data: {
+  name: string
+  kind: 'telegram' | 'whatsapp'
+  address: string
+  is_active?: boolean
+  sort_order?: number
+}): Promise<ReportChannel> {
+  const r = await fetch(`${API}/api/integrations/report-channels/`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!r.ok) throw new Error('CREATE_REPORT_CHANNEL_FAILED')
+  return r.json()
+}
+
+export async function updateReportChannel(
+  id: string,
+  data: Partial<Pick<ReportChannel, 'name' | 'kind' | 'address' | 'is_active' | 'sort_order'>>,
+): Promise<ReportChannel> {
+  const r = await fetch(`${API}/api/integrations/report-channels/${id}/`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!r.ok) throw new Error('UPDATE_REPORT_CHANNEL_FAILED')
+  return r.json()
+}
+
+export async function deleteReportChannel(id: string): Promise<void> {
+  const r = await fetch(`${API}/api/integrations/report-channels/${id}/`, {
+    method: 'DELETE',
+    credentials: 'include',
+  })
+  if (!r.ok) throw new Error('DELETE_REPORT_CHANNEL_FAILED')
+}
+
+export async function fetchReportRoutes(): Promise<ReportRoute[]> {
+  const r = await fetch(`${API}/api/integrations/report-routes/`, { credentials: 'include' })
+  if (!r.ok) throw new Error('FETCH_REPORT_ROUTES_FAILED')
+  return r.json()
+}
+
+export async function updateReportRoute(
+  id: string,
+  data: { enabled?: boolean; channel_ids?: string[] },
+): Promise<ReportRoute> {
+  const r = await fetch(`${API}/api/integrations/report-routes/${id}/`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!r.ok) throw new Error('UPDATE_REPORT_ROUTE_FAILED')
+  return r.json()
+}
+
+export async function sendLowStockReport(): Promise<{
+  ok: boolean
+  details?: string
+  channel_results?: Record<string, { ok: boolean; details?: string; queued?: boolean }>
+}> {
+  const r = await fetch(`${API}/api/integrations/low-stock/send/`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}))
+    throw Object.assign(new Error('LOW_STOCK_SEND_FAILED'), { detail: body?.detail })
+  }
+  return r.json()
 }
 
 export async function sendDailyDebtRemindersAll(): Promise<{

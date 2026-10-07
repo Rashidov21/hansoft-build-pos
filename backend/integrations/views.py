@@ -16,15 +16,24 @@ from debt.models import Customer, Debt
 from licensing.services import get_license_state
 
 from .backup_upload import upload_backup_to_remote
-from .models import IntegrationSettings
-from .serializers import IntegrationSettingsSerializer
+from .models import IntegrationSettings, ReportChannel, ReportRoute
+from .serializers import (
+    IntegrationSettingsSerializer,
+    ReportChannelSerializer,
+    ReportRouteSerializer,
+)
 from .debt_reminders import (
     build_debt_items_for_customer,
     customer_open_debt_total,
     run_auto_daily_debt_reminders_if_due,
     send_daily_debt_reminders_to_all_customers,
 )
-from .services import send_daily_z_report, send_whatsapp_reminder, send_whatsapp_text
+from .services import (
+    send_daily_z_report,
+    send_low_stock_report,
+    send_whatsapp_reminder,
+    send_whatsapp_text,
+)
 
 
 def _request_lang(request) -> str:
@@ -38,15 +47,118 @@ class IntegrationSettingsView(APIView):
     permission_classes = [IsAuthenticated, IsAdminOrOwner]
 
     def get(self, request):
+        from .report_routing import ensure_channels_from_legacy, ensure_default_routes
+
+        ensure_default_routes()
+        ensure_channels_from_legacy()
         obj = IntegrationSettings.get_solo()
         return Response(IntegrationSettingsSerializer(obj).data)
 
     def put(self, request):
+        from .report_routing import ensure_channels_from_legacy
+
         obj = IntegrationSettings.get_solo()
         ser = IntegrationSettingsSerializer(obj, data=request.data, partial=True)
         ser.is_valid(raise_exception=True)
         ser.save()
+        ensure_channels_from_legacy()
+        return Response(IntegrationSettingsSerializer(IntegrationSettings.get_solo()).data)
+
+
+class ReportChannelListCreateView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminOrOwner]
+
+    def get(self, request):
+        from .report_routing import ensure_channels_from_legacy, ensure_default_routes
+
+        ensure_default_routes()
+        ensure_channels_from_legacy()
+        qs = ReportChannel.objects.all().order_by("sort_order", "name")
+        return Response(ReportChannelSerializer(qs, many=True).data)
+
+    def post(self, request):
+        from .report_routing import sync_legacy_chat_fields_from_channels
+
+        ser = ReportChannelSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        ser.save()
+        sync_legacy_chat_fields_from_channels()
+        return Response(ser.data, status=201)
+
+
+class ReportChannelDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminOrOwner]
+
+    def get_object(self, pk):
+        try:
+            return ReportChannel.objects.get(pk=pk)
+        except ReportChannel.DoesNotExist:
+            return None
+
+    def put(self, request, pk):
+        from .report_routing import sync_legacy_chat_fields_from_channels
+
+        obj = self.get_object(pk)
+        if not obj:
+            return Response({"code": "NOT_FOUND", "detail": "Channel not found"}, status=404)
+        ser = ReportChannelSerializer(obj, data=request.data, partial=True)
+        ser.is_valid(raise_exception=True)
+        ser.save()
+        sync_legacy_chat_fields_from_channels()
         return Response(ser.data)
+
+    def delete(self, request, pk):
+        from .report_routing import sync_legacy_chat_fields_from_channels
+
+        obj = self.get_object(pk)
+        if not obj:
+            return Response({"code": "NOT_FOUND", "detail": "Channel not found"}, status=404)
+        obj.delete()
+        sync_legacy_chat_fields_from_channels()
+        return Response(status=204)
+
+
+class ReportRouteListView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminOrOwner]
+
+    def get(self, request):
+        from .report_routing import ensure_channels_from_legacy, ensure_default_routes
+
+        ensure_default_routes()
+        ensure_channels_from_legacy()
+        qs = ReportRoute.objects.prefetch_related("channels").all()
+        return Response(ReportRouteSerializer(qs, many=True).data)
+
+
+class ReportRouteDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminOrOwner]
+
+    def put(self, request, pk):
+        try:
+            obj = ReportRoute.objects.prefetch_related("channels").get(pk=pk)
+        except ReportRoute.DoesNotExist:
+            return Response({"code": "NOT_FOUND", "detail": "Route not found"}, status=404)
+        ser = ReportRouteSerializer(obj, data=request.data, partial=True)
+        ser.is_valid(raise_exception=True)
+        ser.save()
+        obj.refresh_from_db()
+        return Response(ReportRouteSerializer(obj).data)
+
+
+class LowStockReportSendView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminOrOwner]
+
+    def post(self, request):
+        try:
+            out = send_low_stock_report(lang=_request_lang(request))
+            if out.get("ok"):
+                return Response(out)
+            return Response(
+                {"code": "LOW_STOCK_SEND_FAILED", "detail": out.get("details"), **out},
+                status=400,
+            )
+        except ValueError as e:
+            return Response({"code": "LOW_STOCK_SEND_FAILED", "detail": str(e)}, status=400)
 
 
 class TelegramZReportSendView(APIView):

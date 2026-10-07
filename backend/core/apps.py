@@ -3,6 +3,7 @@ from django.apps import AppConfig
 _AUTO_Z_THREAD_STARTED = False
 _AUTO_BACKUP_THREAD_STARTED = False
 _AUTO_DEBT_REMINDER_THREAD_STARTED = False
+_AUTO_LOW_STOCK_THREAD_STARTED = False
 
 
 class CoreConfig(AppConfig):
@@ -139,4 +140,40 @@ class CoreConfig(AppConfig):
                     "Auto debt reminder scheduler started (daily at %02d:%02d)",
                     debt_hour,
                     debt_minute,
+                )
+
+        # Daily low-stock report (staff / configured channels)
+        global _AUTO_LOW_STOCK_THREAD_STARTED
+        if not _AUTO_LOW_STOCK_THREAD_STARTED and os.environ.get("ENABLE_AUTO_LOW_STOCK", "1") != "0":
+            if "runserver" not in sys.argv or os.environ.get("RUN_MAIN") == "true":
+                _AUTO_LOW_STOCK_THREAD_STARTED = True
+                low_hhmm = (os.environ.get("AUTO_LOW_STOCK_TIME", "08:00") or "08:00").strip()
+                try:
+                    low_hour, low_minute = [int(x) for x in low_hhmm.split(":", 1)]
+                except Exception:
+                    low_hour, low_minute = 8, 0
+
+                def _low_stock_loop():
+                    while True:
+                        try:
+                            now = timezone.localtime()
+                            if now.hour == low_hour and now.minute == low_minute:
+                                from integrations.services import run_auto_daily_low_stock_report_if_due
+
+                                result = run_auto_daily_low_stock_report_if_due(now=now)
+                                logger.info("Auto low-stock scheduler tick: %s", result)
+                                time.sleep(65)
+                                continue
+                        except Exception as exc:
+                            logger.warning("Auto low-stock scheduler error: %s", exc)
+                        time.sleep(20)
+
+                low_thread = threading.Thread(
+                    target=_low_stock_loop, name="auto-low-stock-scheduler", daemon=True
+                )
+                low_thread.start()
+                logger.info(
+                    "Auto low-stock scheduler started (daily at %02d:%02d)",
+                    low_hour,
+                    low_minute,
                 )

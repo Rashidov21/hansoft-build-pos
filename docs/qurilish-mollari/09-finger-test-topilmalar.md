@@ -153,3 +153,9 @@ Jiddiylik: **P0** bloklovchi / chalkashlik yuqori · **P1** layout/visual buzili
 6. ✅ **P3** — F1/F2/F3 doim yorliq bilan (Naqd/Karta/Nasiya).  
 7. ✅ **P2/P4** — savat `table-fixed` + qty wrap; global Chakana/Ulgurji «Yangi qator» yorlig‘i.  
 8. ✅ Seed/locale — `Asosiy` brand; POS da `Category` yashirinadi; qaytarish hintidan «model» olib tashlandi.
+
+---
+
+## 12. POS savdo UI buzilishi (keyingi)
+
+Screenshot (savat + miqdor ± vertikal wrap, to‘lov paneli scroll): yechimlar → [10-pos-ui-yechimlar.md](./10-pos-ui-yechimlar.md) (**Y1–Y6**).

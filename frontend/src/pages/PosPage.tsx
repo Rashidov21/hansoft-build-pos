@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Calculator, LogOut, Printer, LayoutGrid, Lock, Pause, Play, Trash2, Users, Pencil, Search } from 'lucide-react'
 import Decimal from 'decimal.js'
@@ -1357,45 +1357,50 @@ export function PosPage({
         </div>
       </header>
 
-      <section className="pos-queue-strip mx-2 pos-sm:mx-3 pos-lg:mx-4 mt-1 pos-lg:mt-3 rounded-lg pos-lg:rounded-xl border border-slate-800 bg-slate-900/70 px-2 py-1.5 pos-lg:p-3 max-h-[min(5.5rem,14dvh)] pos-lg:max-h-[min(9rem,22dvh)] min-h-0 flex flex-col shrink-0">
-        <div className="flex items-center justify-between gap-2 shrink-0 flex-wrap">
-          <div className="inline-flex items-center gap-1.5 text-xs pos-lg:text-sm text-slate-300 truncate">
+      <section
+        className={`pos-queue-strip mx-2 pos-sm:mx-3 pos-lg:mx-4 mt-1 pos-lg:mt-3 rounded-lg pos-lg:rounded-xl border border-slate-800 bg-slate-900/70 px-2 py-1 pos-lg:px-3 pos-lg:py-1.5 min-h-0 flex flex-col shrink-0 ${
+          suspendedCarts.length > 0
+            ? 'max-h-[min(5.5rem,14dvh)] pos-lg:max-h-[min(9rem,22dvh)]'
+            : ''
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2 shrink-0">
+          <div className="inline-flex items-center gap-1.5 text-xs pos-lg:text-sm text-slate-300 truncate min-w-0">
             <Users className="h-3.5 w-3.5 pos-lg:h-4 pos-lg:w-4 shrink-0" />
             <span className="truncate">
               {t('pos.activeSessions', { defaultValue: 'Faol navbatlar' })}: {suspendedCarts.length}
             </span>
           </div>
-          <div className="flex flex-col items-end gap-0.5 shrink-0">
-            <span className="text-[10px] uppercase tracking-wide text-slate-500">
-              {t('pos.priceModeDefault', { defaultValue: 'Yangi qator' })}
-            </span>
-            <div className="inline-flex rounded-xl border border-slate-600 overflow-hidden">
-              <button
-                type="button"
-                className={`touch-btn min-h-9 px-3 text-xs font-semibold ${
-                  priceMode === 'retail'
-                    ? 'bg-emerald-700 text-white'
-                    : 'bg-slate-800 text-slate-300'
-                }`}
-                onClick={() => setPriceMode('retail')}
-              >
-                {t('pos.priceRetail', { defaultValue: 'Chakana' })}
-              </button>
-              <button
-                type="button"
-                className={`touch-btn min-h-9 px-3 text-xs font-semibold ${
-                  priceMode === 'wholesale'
-                    ? 'bg-amber-700 text-white'
-                    : 'bg-slate-800 text-slate-300'
-                }`}
-                onClick={() => setPriceMode('wholesale')}
-                title={t('pos.priceWholesaleHint', {
-                  defaultValue: 'Faqat ulgurji narxi bor tovarlarga qo‘llanadi',
-                })}
-              >
-                {t('pos.priceWholesale', { defaultValue: 'Ulgurji' })}
-              </button>
-            </div>
+          <div
+            className="inline-flex rounded-xl border border-slate-600 overflow-hidden shrink-0"
+            title={t('pos.priceModeDefault', { defaultValue: 'Yangi qator uchun narx turi' })}
+            aria-label={t('pos.priceModeDefault', { defaultValue: 'Yangi qator uchun narx turi' })}
+          >
+            <button
+              type="button"
+              className={`touch-btn min-h-9 px-3 text-xs font-semibold ${
+                priceMode === 'retail'
+                  ? 'bg-emerald-700 text-white'
+                  : 'bg-slate-800 text-slate-300'
+              }`}
+              onClick={() => setPriceMode('retail')}
+            >
+              {t('pos.priceRetail', { defaultValue: 'Chakana' })}
+            </button>
+            <button
+              type="button"
+              className={`touch-btn min-h-9 px-3 text-xs font-semibold ${
+                priceMode === 'wholesale'
+                  ? 'bg-amber-700 text-white'
+                  : 'bg-slate-800 text-slate-300'
+              }`}
+              onClick={() => setPriceMode('wholesale')}
+              title={t('pos.priceWholesaleHint', {
+                defaultValue: 'Faqat ulgurji narxi bor tovarlarga qo‘llanadi',
+              })}
+            >
+              {t('pos.priceWholesale', { defaultValue: 'Ulgurji' })}
+            </button>
           </div>
           <button
             type="button"
@@ -1591,186 +1596,211 @@ export function PosPage({
             } ${cartFlash ? 'border-emerald-500' : 'border-slate-800'}`}
           >
             <table className="w-full text-sm table-fixed">
+              <colgroup>
+                <col className="w-auto" />
+                {showPurchasePrice ? <col className="w-[7rem]" /> : null}
+                <col className="w-[9.75rem]" />
+                <col className="w-[7.5rem]" />
+              </colgroup>
               <thead className="bg-slate-900 text-slate-400">
                 <tr>
-                  <th className="text-left p-3 w-[42%]">{t('cart.title')}</th>
+                  <th className="text-left p-2 pos-lg:p-3">{t('cart.title')}</th>
                   {showPurchasePrice && (
-                    <th className="text-right p-3 whitespace-nowrap w-[18%]">{t('admin.catalog.purchasePrice')}</th>
+                    <th className="text-right p-2 pos-lg:p-3 whitespace-nowrap text-xs">
+                      {t('admin.catalog.purchasePrice')}
+                    </th>
                   )}
-                  <th className="p-3 w-[22%]">{t('cart.qty')}</th>
-                  <th className="text-right p-3 w-[18%]">{t('cart.sum')}</th>
+                  <th className="p-2 pos-lg:p-3 w-[9.75rem]">{t('cart.qty')}</th>
+                  <th className="text-right p-2 pos-lg:p-3 w-[7.5rem]">{t('cart.sum')}</th>
                 </tr>
               </thead>
               <tbody>
-                {cart.map((l, idx) => (
-                  <tr
-                    key={cartLineKey(l)}
-                    className={`border-t border-slate-800 ${l.isBonus ? 'bg-amber-950/20' : ''}`}
-                  >
-                    <td className="p-3">
-                      <div className="font-medium flex flex-wrap items-center gap-2">
-                        <span>{l.name}</span>
-                        {l.isBonus ? (
-                          <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-700/80 border border-amber-500 text-amber-50">
-                            {t('pos.bonus', { defaultValue: 'Bonus' })}
-                          </span>
-                        ) : null}
-                      </div>
-                      <div className="text-xs text-slate-400">
-                        {`${t(`unit.${normalizeUnit(l.unit)}`, { defaultValue: normalizeUnit(l.unit) })} · ${formatMoney(l.listPrice)}/${t(`unit.${normalizeUnit(l.unit)}`, { defaultValue: normalizeUnit(l.unit) })}`}
-                        {l.priceTier === 'wholesale' ? (
-                          <span className="ml-2 text-amber-400">
-                            ({t('pos.priceWholesale', { defaultValue: 'Ulgurji' })})
-                          </span>
-                        ) : null}
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {hasWholesalePrice({ wholesale_price: l.wholesalePrice }) ? (
-                          <div className="inline-flex rounded-xl border border-slate-600 overflow-hidden">
+                {cart.map((l, idx) => {
+                  const unit = normalizeUnit(l.unit)
+                  const colSpan = showPurchasePrice ? 4 : 3
+                  return (
+                    <Fragment key={cartLineKey(l)}>
+                      <tr
+                        className={`border-t border-slate-800 ${l.isBonus ? 'bg-amber-950/20' : ''}`}
+                      >
+                        <td className="p-2 pos-lg:p-3 align-middle min-w-0">
+                          <div className="font-medium flex items-center gap-2 min-w-0">
+                            <span className="truncate">{l.name}</span>
+                            {l.isBonus ? (
+                              <span className="shrink-0 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-700/80 border border-amber-500 text-amber-50">
+                                {t('pos.bonus', { defaultValue: 'Bonus' })}
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="text-xs text-slate-400 truncate">
+                            {`${t(`unit.${unit}`, { defaultValue: unit })} · ${formatMoney(l.listPrice)}/${t(`unit.${unit}`, { defaultValue: unit })}`}
+                            {l.priceTier === 'wholesale' ? (
+                              <span className="ml-2 text-amber-400">
+                                ({t('pos.priceWholesale', { defaultValue: 'Ulgurji' })})
+                              </span>
+                            ) : null}
+                          </div>
+                        </td>
+                        {showPurchasePrice && (
+                          <td className="p-2 pos-lg:p-3 text-right text-xs tabular-nums text-amber-300/90 whitespace-nowrap align-middle">
+                            {l.purchasePrice ? formatMoney(l.purchasePrice) : '—'}
+                          </td>
+                        )}
+                        <td className="p-2 pos-lg:p-3 text-center align-middle w-[9.75rem]">
+                          <div
+                            ref={idx === cart.length - 1 ? lastQtyCellRef : undefined}
+                            tabIndex={idx === cart.length - 1 ? 0 : -1}
+                            className="inline-flex flex-nowrap items-center justify-center gap-1 outline-none rounded-lg focus-visible:ring-2 focus-visible:ring-emerald-500"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <button
                               type="button"
-                              className={`touch-btn min-h-10 px-2 text-xs ${
-                                (l.priceTier || 'retail') === 'retail'
-                                  ? 'bg-emerald-800 text-emerald-50'
-                                  : 'bg-slate-800 text-slate-300'
-                              }`}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setLinePriceTier(l.variantId, 'retail', { isBonus: l.isBonus })
-                              }}
+                              className="touch-btn min-h-10 min-w-10 shrink-0 rounded-lg bg-slate-800 border border-slate-600 text-lg font-semibold"
+                              onClick={() =>
+                                incQty(l.variantId, -qtyStep(unit), { isBonus: l.isBonus })
+                              }
                             >
-                              {t('pos.priceRetail', { defaultValue: 'Chakana' })}
+                              -
                             </button>
                             <button
                               type="button"
-                              className={`touch-btn min-h-10 px-2 text-xs ${
-                                l.priceTier === 'wholesale'
-                                  ? 'bg-amber-800 text-amber-50'
-                                  : 'bg-slate-800 text-slate-300'
-                              }`}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setLinePriceTier(l.variantId, 'wholesale', { isBonus: l.isBonus })
-                              }}
+                              className="touch-btn min-h-10 min-w-[3.5rem] shrink-0 px-1.5 rounded-lg bg-slate-950 border border-slate-600 text-center text-sm font-medium tabular-nums inline-flex items-center justify-center gap-0.5"
+                              aria-label={t('pos.openNumpad')}
+                              onClick={() =>
+                                openAmountNumpad({
+                                  kind: 'qty',
+                                  variantId: l.variantId,
+                                  isBonus: l.isBonus,
+                                })
+                              }
                             >
-                              {t('pos.priceWholesale', { defaultValue: 'Ulgurji' })}
+                              <span>{formatQty(l.qty, unit)}</span>
+                              <span className="text-[10px] text-slate-500 font-normal">
+                                {t(`unit.${unit}`, { defaultValue: unit })}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="touch-btn min-h-10 min-w-10 shrink-0 rounded-lg bg-slate-800 border border-slate-600 text-lg font-semibold"
+                              onClick={() =>
+                                incQty(l.variantId, qtyStep(unit), { isBonus: l.isBonus })
+                              }
+                            >
+                              +
                             </button>
                           </div>
-                        ) : null}
-                        <button
-                          type="button"
-                          className={`touch-btn inline-flex items-center gap-1 text-xs px-3 py-2 rounded-xl border ${
-                            l.isBonus
-                              ? 'bg-emerald-800/80 border-emerald-500 text-emerald-50'
-                              : 'bg-slate-800 border-slate-600 text-slate-200'
-                          }`}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            toggleLineBonus({
-                              variantId: l.variantId,
-                              isBonus: l.isBonus,
-                            })
-                          }}
-                        >
-                          {t('pos.bonus', { defaultValue: 'Bonus' })}
-                        </button>
-                        {l.productId ? (
-                          <button
-                            type="button"
-                            className="touch-btn inline-flex items-center gap-2 text-xs px-3 py-2 rounded-xl bg-slate-800 border border-slate-600 text-slate-200"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setStockMatrix({
-                                productId: l.productId,
-                                title: l.name,
-                              })
-                            }}
-                          >
-                            <LayoutGrid className="h-4 w-4 shrink-0" aria-hidden />
-                            {t('pos.stockMatrix')}
-                          </button>
-                        ) : null}
-                      </div>
-                    </td>
-                    {showPurchasePrice && (
-                      <td className="p-3 text-right text-sm tabular-nums text-amber-300/90 whitespace-nowrap">
-                        {l.purchasePrice ? formatMoney(l.purchasePrice) : '—'}
-                      </td>
-                    )}
-                    <td className="p-3 text-center">
-                      <div
-                        ref={idx === cart.length - 1 ? lastQtyCellRef : undefined}
-                        tabIndex={idx === cart.length - 1 ? 0 : -1}
-                        className="inline-flex flex-wrap items-center justify-center gap-1.5 outline-none rounded-lg focus-visible:ring-2 focus-visible:ring-emerald-500"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <button
-                          type="button"
-                          className="touch-btn min-h-kiosk-touch min-w-kiosk-touch rounded-xl bg-slate-800 border border-slate-600 text-lg font-semibold"
-                          onClick={() =>
-                            incQty(l.variantId, -qtyStep(normalizeUnit(l.unit)), { isBonus: l.isBonus })
-                          }
-                        >
-                          -
-                        </button>
-                        <button
-                          type="button"
-                          className="touch-btn min-h-kiosk-touch min-w-[3.25rem] px-2 rounded-xl bg-slate-950 border border-slate-600 text-center text-kiosk font-medium tabular-nums"
-                          aria-label={t('pos.openNumpad')}
-                          onClick={() => openAmountNumpad({ kind: 'qty', variantId: l.variantId, isBonus: l.isBonus })}
-                        >
-                          {formatQty(l.qty, normalizeUnit(l.unit))}
-                          <span className="block text-[10px] text-slate-500 font-normal">
-                            {t(`unit.${normalizeUnit(l.unit)}`, { defaultValue: normalizeUnit(l.unit) })}
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          className="touch-btn min-h-kiosk-touch min-w-kiosk-touch rounded-xl bg-slate-800 border border-slate-600 text-lg font-semibold"
-                          onClick={() =>
-                            incQty(l.variantId, qtyStep(normalizeUnit(l.unit)), { isBonus: l.isBonus })
-                          }
-                        >
-                          +
-                        </button>
-                      </div>
-                    </td>
-                    <td className="p-3 text-right text-base">
-                      <div className="inline-flex items-center justify-end gap-2">
-                        {l.isBonus ? (
-                          <span className="tabular-nums text-emerald-300 font-medium">
-                            {formatMoney('0')}
-                            <span className="block text-[10px] text-slate-500 line-through font-normal">
-                              {formatMoney(moneyFromLine(l.listPrice, l.qty))}
-                            </span>
-                          </span>
-                        ) : (
-                          <span className="tabular-nums">{formatMoney(linePayAmount(l))}</span>
-                        )}
-                        <button
-                          type="button"
-                          className="touch-btn min-h-kiosk-touch min-w-kiosk-touch inline-flex items-center justify-center rounded-xl bg-slate-800 border border-slate-600 text-slate-200 hover:bg-slate-700"
-                          aria-label={t('admin.catalog.salePrice')}
-                          title={t('admin.catalog.salePrice')}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setPriceEditBaseline(l.listPrice)
-                            setNumpadValue(String(parseSom(l.listPrice)))
-                            setSelectedLine({
-                              variantId: l.variantId,
-                              name: l.name,
-                              stockQty: Number(l.stockQty || 0),
-                              listPrice: l.listPrice,
-                              isBonus: l.isBonus,
-                            })
-                          }}
-                        >
-                          <Pencil className="h-4 w-4" aria-hidden />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                        </td>
+                        <td className="p-2 pos-lg:p-3 text-right text-base align-middle">
+                          <div className="inline-flex items-center justify-end gap-1.5">
+                            {l.isBonus ? (
+                              <span className="tabular-nums text-emerald-300 font-medium">
+                                {formatMoney('0')}
+                                <span className="block text-[10px] text-slate-500 line-through font-normal">
+                                  {formatMoney(moneyFromLine(l.listPrice, l.qty))}
+                                </span>
+                              </span>
+                            ) : (
+                              <span className="tabular-nums">{formatMoney(linePayAmount(l))}</span>
+                            )}
+                            <button
+                              type="button"
+                              className="touch-btn min-h-10 min-w-10 shrink-0 inline-flex items-center justify-center rounded-lg bg-slate-800 border border-slate-600 text-slate-200 hover:bg-slate-700"
+                              aria-label={t('admin.catalog.salePrice')}
+                              title={t('admin.catalog.salePrice')}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setPriceEditBaseline(l.listPrice)
+                                setNumpadValue(String(parseSom(l.listPrice)))
+                                setSelectedLine({
+                                  variantId: l.variantId,
+                                  name: l.name,
+                                  stockQty: Number(l.stockQty || 0),
+                                  listPrice: l.listPrice,
+                                  isBonus: l.isBonus,
+                                })
+                              }}
+                            >
+                              <Pencil className="h-4 w-4" aria-hidden />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      <tr className={l.isBonus ? 'bg-amber-950/20' : ''}>
+                        <td colSpan={colSpan} className="px-2 pb-2 pos-lg:px-3 pt-0">
+                          <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto kiosk-scrollbar pb-0.5">
+                            {hasWholesalePrice({ wholesale_price: l.wholesalePrice }) ? (
+                              <div className="inline-flex shrink-0 rounded-lg border border-slate-600 overflow-hidden">
+                                <button
+                                  type="button"
+                                  className={`touch-btn min-h-8 px-2 text-[11px] ${
+                                    (l.priceTier || 'retail') === 'retail'
+                                      ? 'bg-emerald-800 text-emerald-50'
+                                      : 'bg-slate-800 text-slate-300'
+                                  }`}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setLinePriceTier(l.variantId, 'retail', { isBonus: l.isBonus })
+                                  }}
+                                >
+                                  {t('pos.priceRetail', { defaultValue: 'Chakana' })}
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`touch-btn min-h-8 px-2 text-[11px] ${
+                                    l.priceTier === 'wholesale'
+                                      ? 'bg-amber-800 text-amber-50'
+                                      : 'bg-slate-800 text-slate-300'
+                                  }`}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setLinePriceTier(l.variantId, 'wholesale', {
+                                      isBonus: l.isBonus,
+                                    })
+                                  }}
+                                >
+                                  {t('pos.priceWholesale', { defaultValue: 'Ulgurji' })}
+                                </button>
+                              </div>
+                            ) : null}
+                            <button
+                              type="button"
+                              className={`touch-btn shrink-0 inline-flex items-center gap-1 text-[11px] px-2.5 min-h-8 rounded-lg border ${
+                                l.isBonus
+                                  ? 'bg-emerald-800/80 border-emerald-500 text-emerald-50'
+                                  : 'bg-slate-800 border-slate-600 text-slate-200'
+                              }`}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                toggleLineBonus({
+                                  variantId: l.variantId,
+                                  isBonus: l.isBonus,
+                                })
+                              }}
+                            >
+                              {t('pos.bonus', { defaultValue: 'Bonus' })}
+                            </button>
+                            {l.productId ? (
+                              <button
+                                type="button"
+                                className="touch-btn shrink-0 inline-flex items-center gap-1.5 text-[11px] px-2.5 min-h-8 rounded-lg bg-slate-800 border border-slate-600 text-slate-200"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setStockMatrix({
+                                    productId: l.productId,
+                                    title: l.name,
+                                  })
+                                }}
+                              >
+                                <LayoutGrid className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                                {t('pos.stockMatrix')}
+                              </button>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    </Fragment>
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -1890,10 +1920,10 @@ export function PosPage({
                         <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-400/90">
                           {t('pay.tendered', { defaultValue: 'Berilgan (naqd)' })}
                         </div>
-                        <div className="flex flex-wrap gap-1.5 items-center">
+                        <div className="flex flex-nowrap gap-1.5 items-center overflow-x-auto kiosk-scrollbar pb-0.5">
                           <button
                             type="button"
-                            className="touch-btn min-h-9 px-2.5 rounded-lg bg-emerald-950/60 border border-emerald-600/70 text-xs font-semibold text-emerald-300 hover:bg-emerald-900/80"
+                            className="touch-btn shrink-0 min-h-9 px-2.5 rounded-lg bg-emerald-950/60 border border-emerald-600/70 text-xs font-semibold text-emerald-300 hover:bg-emerald-900/80"
                             onClick={() =>
                               updatePaymentRow(r.id, {
                                 amount: cashChange.cashOwed.gt(0)
@@ -1912,7 +1942,7 @@ export function PosPage({
                             <button
                               key={val}
                               type="button"
-                              className="touch-btn min-h-9 px-2 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-300 hover:bg-slate-800"
+                              className="touch-btn shrink-0 min-h-9 px-2 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-300 hover:bg-slate-800"
                               onClick={() => updatePaymentRow(r.id, { amount: String(val) })}
                             >
                               {formatMoney(String(val))}

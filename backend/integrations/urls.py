@@ -5,7 +5,12 @@ from .views import (
     DailyDebtReminderAutoRunView,
     DailyDebtReminderSendView,
     IntegrationSettingsView,
+    LowStockReportSendView,
     NotificationQueueFlushView,
+    ReportChannelDetailView,
+    ReportChannelListCreateView,
+    ReportRouteDetailView,
+    ReportRouteListView,
     TelegramZReportSendView,
     WhatsAppDebtReminderView,
     WhatsAppSendTextView,
@@ -14,8 +19,13 @@ from .views import (
 
 urlpatterns = [
     path("settings/", IntegrationSettingsView.as_view()),
+    path("report-channels/", ReportChannelListCreateView.as_view()),
+    path("report-channels/<uuid:pk>/", ReportChannelDetailView.as_view()),
+    path("report-routes/", ReportRouteListView.as_view()),
+    path("report-routes/<uuid:pk>/", ReportRouteDetailView.as_view()),
     path("backup/auto-run/", BackupAutoRunView.as_view()),
     path("z-report/send/", ZReportSendView.as_view()),
+    path("low-stock/send/", LowStockReportSendView.as_view()),
     path("telegram/send-z-report/", TelegramZReportSendView.as_view()),
     path("whatsapp/remind/", WhatsAppDebtReminderView.as_view()),
     path("whatsapp/debt-reminders/daily/", DailyDebtReminderSendView.as_view()),
@@ -23,4 +33,3 @@ urlpatterns = [
     path("whatsapp/send-text/", WhatsAppSendTextView.as_view()),
     path("notification-queue/flush/", NotificationQueueFlushView.as_view()),
 ]
-

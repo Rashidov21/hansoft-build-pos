@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import IntegrationSettings
+from .models import IntegrationSettings, ReportChannel, ReportRoute
 
 
 class IntegrationSettingsSerializer(serializers.ModelSerializer):
@@ -49,6 +49,7 @@ class IntegrationSettingsSerializer(serializers.ModelSerializer):
             "primary_report_channel",
             "report_lang",
             "auto_daily_z_report_enabled",
+            "auto_low_stock_report_enabled",
             "telegram_db_backup_interval_days",
             "auto_debt_whatsapp_reminder_enabled",
             "updated_at",
@@ -72,3 +73,59 @@ class IntegrationSettingsSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("telegram_db_backup_interval_days must be 0, 1, or 3.")
         return days
 
+
+class ReportChannelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReportChannel
+        fields = [
+            "id",
+            "name",
+            "kind",
+            "address",
+            "is_active",
+            "sort_order",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def validate_kind(self, value):
+        raw = (value or "").strip().lower()
+        if raw not in (ReportChannel.Kind.TELEGRAM, ReportChannel.Kind.WHATSAPP):
+            raise serializers.ValidationError("kind must be telegram or whatsapp")
+        return raw
+
+    def validate_address(self, value):
+        raw = (value or "").strip()
+        if not raw:
+            raise serializers.ValidationError("address is required")
+        return raw
+
+
+class ReportRouteSerializer(serializers.ModelSerializer):
+    channel_ids = serializers.ListField(
+        child=serializers.UUIDField(),
+        write_only=True,
+        required=False,
+    )
+    channels = ReportChannelSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ReportRoute
+        fields = [
+            "id",
+            "report_type",
+            "enabled",
+            "channels",
+            "channel_ids",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "report_type", "channels", "updated_at"]
+
+    def update(self, instance, validated_data):
+        channel_ids = validated_data.pop("channel_ids", None)
+        instance = super().update(instance, validated_data)
+        if channel_ids is not None:
+            qs = ReportChannel.objects.filter(id__in=channel_ids)
+            instance.channels.set(qs)
+        return instance
