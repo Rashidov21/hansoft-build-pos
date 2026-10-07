@@ -2178,7 +2178,7 @@ export function PosPage({
                 type="button"
                 disabled={cart.length === 0 && salePhase === 'idle'}
                 className="touch-btn min-h-kiosk-touch rounded-xl border border-rose-600/70 bg-rose-950/60 hover:bg-rose-900/80 disabled:opacity-40 font-semibold text-kiosk-sm px-2"
-                onClick={cancelSaleFlow}
+                onClick={() => cancelSaleFlow()}
               >
                 {t('pos.cancelSale', { defaultValue: 'Bekor' })}
               </button>
