@@ -29,6 +29,8 @@ Implementatsiya: reja bosqichlari `build_pos_moslash`. Demo seed: `backend/clear
 | [04-ozgarishlar-xaritasi.md](./04-ozgarishlar-xaritasi.md) | Fayl/modul bo‘yicha o‘zgarishlar |
 | [05-ux-va-soddalashtirish.md](./05-ux-va-soddalashtirish.md) | UX qoidalari |
 | [06-bosqichlar.md](./06-bosqichlar.md) | Bosqich 0–7, gate (tasdiq) tartibi |
+| [07-multi-kassa-ops.md](./07-multi-kassa-ops.md) | S8: 1 server + 1–2 client (LAN, WAL, firewall) |
+| [08-yakuniy-qa.md](./08-yakuniy-qa.md) | Bosqich 7: S1–S8 + qaytim checklist |
 
 ## Asosiy savdo oqimi
 

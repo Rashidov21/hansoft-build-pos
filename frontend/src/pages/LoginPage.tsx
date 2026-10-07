@@ -196,7 +196,7 @@ export function LoginPage({ onDone }: { onDone: () => void | Promise<void> }) {
 
           <button
             type="submit"
-            disabled={busy || !u}
+            disabled={busy || !u || p.replace(/\D/g, '').length < 4}
             className="touch-btn w-full min-h-kiosk-touch py-3 pos-lg:py-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-kiosk pos-lg:text-lg font-semibold"
           >
             {busy ? t('auth.logging') : t('auth.login')}

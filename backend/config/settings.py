@@ -75,7 +75,13 @@ if not DEBUG and (
     not SECRET_KEY or SECRET_KEY == "dev-only-change-in-production-geeks-pos-mvp"
 ):
     raise RuntimeError("DJANGO_SECRET_KEY must be set when DEBUG=0")
-ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
+# LAN multi-kassa: set DJANGO_ALLOWED_HOSTS=192.168.1.10,pos-server.local
+_extra_hosts = [
+    h.strip()
+    for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",")
+    if h.strip()
+]
+ALLOWED_HOSTS = ["127.0.0.1", "localhost", *_extra_hosts]
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -276,6 +282,13 @@ CSRF_TRUSTED_ORIGINS = [
     "http://localhost:8000",
     "https://tauri.localhost",
 ]
+# Optional LAN origins, comma-separated absolute origins (scheme+host[+port]).
+_extra_csrf = [
+    o.strip()
+    for o in os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",")
+    if o.strip()
+]
+CSRF_TRUSTED_ORIGINS = [*CSRF_TRUSTED_ORIGINS, *_extra_csrf]
 
 LOG_DIR = Path(os.environ.get("GEEKS_POS_LOG_DIR", str(APP_HOME_DIR / "logs")))
 LOG_DIR.mkdir(parents=True, exist_ok=True)

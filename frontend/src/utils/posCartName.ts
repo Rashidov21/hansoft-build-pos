@@ -30,9 +30,11 @@ export function cartNameFieldsFromVariant(v: CartNameFields): CartNameFields {
 }
 
 export function formatPosCartLineName(fields: CartNameFields, lang?: string): string {
-  const brand = pickCategoryName(fields, lang)
+  const brand = pickCategoryName(fields, lang).trim()
+  // Legacy seed used literal "Category" as brand — hide placeholder noise on POS.
+  const brandOk = brand && !/^category$/i.test(brand) ? brand : ''
   const custom = pickCustomName(fields, lang)
   const model = pickProductName(fields, lang)
   const title = (custom || model).trim()
-  return [brand, title].filter(Boolean).join(' ')
+  return [brandOk, title].filter(Boolean).join(' ')
 }

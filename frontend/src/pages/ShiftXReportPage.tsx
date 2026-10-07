@@ -33,6 +33,7 @@ export function ShiftXReportPage({ onLogout }: { onLogout?: () => void }) {
   const [zBusy, setZBusy] = useState(false)
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
   const [shiftStatus, setShiftStatus] = useState<ShiftStatus | null>(null)
+  const [shiftStatusLoaded, setShiftStatusLoaded] = useState(false)
   const [shiftBusy, setShiftBusy] = useState(false)
   const [showCloseModal, setShowCloseModal] = useState(false)
   const [isOnline, setIsOnline] = useState(navigator.onLine)
@@ -73,7 +74,9 @@ export function ShiftXReportPage({ onLogout }: { onLogout?: () => void }) {
       const status = await checkShiftStatus()
       setShiftStatus(status)
     } catch {
-      // Ignore errors
+      setShiftStatus({ has_open_shift: false })
+    } finally {
+      setShiftStatusLoaded(true)
     }
   }, [])
 
@@ -213,7 +216,9 @@ export function ShiftXReportPage({ onLogout }: { onLogout?: () => void }) {
           )}
         </div>
         
-        {shiftStatus?.has_open_shift ? (
+        {!shiftStatusLoaded ? (
+          <div className="text-sm text-slate-500">{t('admin.common.loading')}</div>
+        ) : shiftStatus?.has_open_shift ? (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="text-sm">
@@ -243,7 +248,10 @@ export function ShiftXReportPage({ onLogout }: { onLogout?: () => void }) {
             </div>
           </div>
         ) : (
-          <div className="text-sm text-slate-500">{t('admin.common.loading')}</div>
+          <div className="text-sm space-y-1">
+            <div className="text-slate-300 font-medium">{t('shift.status.closed')}</div>
+            <p className="text-xs text-slate-500">{t('shift.status.noOpenShift')}</p>
+          </div>
         )}
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -265,15 +273,15 @@ export function ShiftXReportPage({ onLogout }: { onLogout?: () => void }) {
             onChange={(e) => setToInput(e.target.value)}
           />
         </label>
+        <button
+          type="button"
+          disabled={busy}
+          className="touch-btn min-h-12 px-5 rounded-xl bg-emerald-700 border border-emerald-500 font-medium disabled:opacity-40 sm:col-span-2"
+          onClick={() => void load()}
+        >
+          {busy ? t('admin.common.loading') : t('admin.cashier.shiftRefresh')}
+        </button>
       </div>
-      <button
-        type="button"
-        disabled={busy}
-        className="touch-btn min-h-12 px-5 rounded-xl bg-emerald-700 border border-emerald-500 font-medium disabled:opacity-40"
-        onClick={() => void load()}
-      >
-        {busy ? t('admin.common.loading') : t('admin.cashier.shiftRefresh')}
-      </button>
       <div className="rounded-xl border border-amber-800/80 bg-slate-900/60 p-4 space-y-3">
         <div className="text-sm font-medium text-amber-100">{t('admin.cashier.dailyCloseTitle')}</div>
         <p className="text-xs text-slate-400">{t('admin.cashier.dailyCloseHint')}</p>

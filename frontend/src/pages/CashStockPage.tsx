@@ -7,7 +7,14 @@ import { ActionToast } from '../components/ActionToast'
 import { dateLocale as resolveDateLocale } from '../utils/localizedName'
 import { formatQty, normalizeUnit } from '../utils/qty'
 
-export function CashStockPage({ role }: { role: UserRole | null }) {
+export function CashStockPage({
+  role,
+  embedded = false,
+}: {
+  role: UserRole | null
+  /** Hide page title when shown inside Warehouse hub */
+  embedded?: boolean
+}) {
   const { t, i18n } = useTranslation()
   const [query, setQuery] = useState('')
   const [debounced, setDebounced] = useState('')
@@ -70,11 +77,20 @@ export function CashStockPage({ role }: { role: UserRole | null }) {
   }
 
   return (
-    <div className="p-4 space-y-4">
-      <h2 className="text-xl font-semibold">{t('admin.cashier.stockTitle')}</h2>
-      <p className="text-sm text-slate-400">
-        {showPurchase ? t('admin.cashier.stockHintAdmin') : t('admin.cashier.stockHint')}
-      </p>
+    <div className={`p-4 space-y-4 ${embedded ? 'pt-0' : ''}`}>
+      {!embedded && (
+        <>
+          <h2 className="text-xl font-semibold">{t('admin.cashier.stockTitle')}</h2>
+          <p className="text-sm text-slate-400">
+            {showPurchase ? t('admin.cashier.stockHintAdmin') : t('admin.cashier.stockHint')}
+          </p>
+        </>
+      )}
+      {embedded && (
+        <p className="text-sm text-slate-400">
+          {showPurchase ? t('admin.cashier.stockHintAdmin') : t('admin.cashier.stockHint')}
+        </p>
+      )}
       {toast && <ActionToast kind="err" message={toast} onClose={() => setToast(null)} />}
       <input
         className="touch-btn w-full max-w-xl min-h-12 px-3 rounded-xl bg-slate-900 border border-slate-700"

@@ -54,6 +54,13 @@ python clear_and_seed_build.py
 
 Eski asal demo: `clear_and_seed_honey.py` — **deprecated**, yangi o‘rnatishlarda ishlatilmasin.
 
+## Multi-kassa (1 server + 1–2 client)
+
+Qisqa yo‘riqnoma: [docs/qurilish-mollari/07-multi-kassa-ops.md](docs/qurilish-mollari/07-multi-kassa-ops.md)
+
+- Server `.env`: `GEEKS_POS_BIND_HOST=0.0.0.0` + `DJANGO_ALLOWED_HOSTS=<LAN_IP>`
+- Client `.env`: `GEEKS_POS_REMOTE_API=http://<LAN_IP>:8000`
+
 ## Hujjatlar
 
 - Qurilish moslash / S1–S8: [docs/qurilish-mollari/](docs/qurilish-mollari/README.md)

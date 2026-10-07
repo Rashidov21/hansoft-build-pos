@@ -24,6 +24,7 @@ Bu hujjat dastur **tashqi** muhit muammolarini kamaytirish uchun qisqa ro‘yxat
 - Agar `database is locked` takrorlansa: bitta `geeks_pos_backend` jarayoni ishlayotganini tekshiring; kerak bo‘lsa ilovani yopib qayta oching.
 - Production build siyosati: `backend/db.sqlite3` buildga kirmasligi kerak (release skript buni endi fail qiladi).
 - Productionda default DB override o‘chirilgan; test uchun kerak bo‘lsa faqat dev rejimida `GEEKS_POS_ALLOW_DB_OVERRIDE=1` bilan `GEEKS_POS_DB_PATH` ishlating.
+- **Multi-kassa (1 server + 1–2 client):** [`qurilish-mollari/07-multi-kassa-ops.md`](qurilish-mollari/07-multi-kassa-ops.md) — `GEEKS_POS_BIND_HOST`, `GEEKS_POS_REMOTE_API`, SQLite WAL cheklovlari.
 
 ## Dastur: ikki marta “Yakunlash” smoke testi (regressiya)
 

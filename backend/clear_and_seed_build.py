@@ -114,7 +114,7 @@ def seed_build_data():
         )
 
         default_cat = Category.objects.create(
-            name_uz="Category", name_ru="Category", sort_order=0
+            name_uz="Asosiy", name_ru="Основной", sort_order=0
         )
 
         def pick_pc(name_uz: str, unit: str) -> ProductCategory:

@@ -103,9 +103,9 @@ const CatalogPage = lazy(async () => {
   const mod = await import('./pages/CatalogPage')
   return { default: mod.CatalogPage }
 })
-const InventoryPage = lazy(async () => {
-  const mod = await import('./pages/InventoryPage')
-  return { default: mod.InventoryPage }
+const WarehousePage = lazy(async () => {
+  const mod = await import('./pages/WarehousePage')
+  return { default: mod.WarehousePage }
 })
 const DebtsPage = lazy(async () => {
   const mod = await import('./pages/DebtsPage')
@@ -1080,16 +1080,26 @@ function AdminPanel(props: {
               />
             }
           />
-          <Route path="inventory" element={isCashier ? <Navigate to="/admin/sales" replace /> : <InventoryPage
-            variants={props.variants}
-            stocktake={props.stocktake}
-            onReceive={props.onInventoryReceive}
-            onAdjust={props.onInventoryAdjust}
-            onCreateStocktake={props.onCreateStocktake}
-            onReloadOpen={props.onReloadOpenStocktake}
-            onSetCount={props.onSetStocktakeCount}
-            onApplyStocktake={props.onApplyStocktake}
-          />} />
+          <Route
+            path="inventory"
+            element={
+              isCashier ? (
+                <Navigate to="/admin/sales" replace />
+              ) : (
+                <WarehousePage
+                  role={props.role}
+                  variants={props.variants}
+                  stocktake={props.stocktake}
+                  onReceive={props.onInventoryReceive}
+                  onAdjust={props.onInventoryAdjust}
+                  onCreateStocktake={props.onCreateStocktake}
+                  onReloadOpen={props.onReloadOpenStocktake}
+                  onSetCount={props.onSetStocktakeCount}
+                  onApplyStocktake={props.onApplyStocktake}
+                />
+              )
+            }
+          />
           <Route path="suppliers" element={isCashier ? <Navigate to="/admin/sales" replace /> : <SuppliersPage />} />
           <Route
             path="debts"
@@ -1102,7 +1112,16 @@ function AdminPanel(props: {
               />
             }
           />
-          <Route path="stock" element={<CashStockPage role={props.role} />} />
+          <Route
+            path="stock"
+            element={
+              isCashier ? (
+                <CashStockPage role={props.role} />
+              ) : (
+                <Navigate to="/admin/inventory" replace />
+              )
+            }
+          />
           <Route path="printer" element={isCashier ? <Navigate to="/admin/sales" replace /> : <Navigate to="/admin/settings" replace />} />
           <Route path="shift" element={<ShiftXReportPage onLogout={performLogout} />} />
           <Route path="expenses" element={<ExpensesPage />} />

@@ -142,7 +142,7 @@ function VariantSearchPicker(props: {
                   onClick={() => onSelect(v.id)}
                 >
                   <div className="font-medium">{pickProductName(v, langRu)}</div>
-                  {pickCategoryName(v, langRu) ? (
+                  {pickCategoryName(v, langRu) && !/^category$/i.test(pickCategoryName(v, langRu)) ? (
                     <div className="text-xs text-slate-500">{pickCategoryName(v, langRu)}</div>
                   ) : null}
                   <div className="text-xs text-slate-400">
@@ -270,6 +270,7 @@ export function InventoryPage({
   onReloadOpen,
   onSetCount,
   onApplyStocktake,
+  embedded = false,
 }: {
   variants: Variant[]
   stocktake: StocktakeSession | null
@@ -279,6 +280,8 @@ export function InventoryPage({
   onReloadOpen: () => Promise<void>
   onSetCount: (variantId: string, countedQty: number) => Promise<void>
   onApplyStocktake: () => Promise<void>
+  /** Hide outer title when shown inside Warehouse hub */
+  embedded?: boolean
 }) {
   const { t, i18n } = useTranslation()
   const langRu = i18n.language.startsWith('ru')
@@ -299,12 +302,20 @@ export function InventoryPage({
   const selectedVariant = useMemo(() => variants.find((v) => v.id === variantId) || null, [variants, variantId])
   const receiveQty = parseQty(qty || '0')
   const adjustQty = parseQty(qtyDelta || '0')
-  const receiveAfter = selectedVariant
+  const receiveAfterQty = selectedVariant
     ? parseQty(Number(selectedVariant.stock_qty ?? 0) + (Number.isFinite(receiveQty) ? Math.max(0, receiveQty) : 0))
     : null
-  const adjustAfter = selectedVariant
+  const adjustAfterQty = selectedVariant
     ? parseQty(Number(selectedVariant.stock_qty ?? 0) + (Number.isFinite(adjustQty) ? adjustQty : 0))
     : null
+  const receiveAfter =
+    receiveAfterQty != null && selectedVariant
+      ? `${formatQty(receiveAfterQty, unitOf(selectedVariant))} ${unitOf(selectedVariant)}`
+      : null
+  const adjustAfter =
+    adjustAfterQty != null && selectedVariant
+      ? `${formatQty(adjustAfterQty, unitOf(selectedVariant))} ${unitOf(selectedVariant)}`
+      : null
 
   const stocktakeLinesFiltered = useMemo(() => {
     if (!stocktake) return []
@@ -348,9 +359,14 @@ export function InventoryPage({
   ]
 
   return (
-    <div className="p-4 space-y-4 max-w-4xl mx-auto">
-      <h2 className="text-xl font-semibold">{t('admin.inventory.title')}</h2>
-      <p className="text-sm text-slate-300">{t('admin.inventory.intro')}</p>
+    <div className={`p-4 space-y-4 max-w-4xl mx-auto ${embedded ? 'pt-0' : ''}`}>
+      {!embedded && (
+        <>
+          <h2 className="text-xl font-semibold">{t('admin.inventory.title')}</h2>
+          <p className="text-sm text-slate-300">{t('admin.inventory.intro')}</p>
+        </>
+      )}
+      {embedded && <p className="text-sm text-slate-300">{t('admin.inventory.intro')}</p>}
       <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-3 text-sm text-slate-300 space-y-1">
         {mode === 'receive' && (
           <>
@@ -380,7 +396,7 @@ export function InventoryPage({
             type="button"
             className={`touch-btn min-h-[3.5rem] px-4 py-3 rounded-xl border text-left transition-colors ${
               mode === tab.id
-                ? 'bg-slate-800 border-slate-500 ring-2 ring-slate-500/40'
+                ? 'bg-emerald-900/70 border-emerald-500 ring-2 ring-emerald-500/50'
                 : 'bg-slate-900/80 border-slate-700 hover:bg-slate-800/80'
             }`}
             onClick={() => {
@@ -474,13 +490,13 @@ export function InventoryPage({
                     {t('admin.inventory.nextStock')}:{' '}
                     <span
                       className={`font-semibold tabular-nums ${
-                        adjustAfter != null && adjustAfter < 0 ? 'text-red-400' : 'text-amber-200'
+                        adjustAfterQty != null && adjustAfterQty < 0 ? 'text-red-400' : 'text-amber-200'
                       }`}
                     >
                       {adjustAfter}
                     </span>
                   </div>
-                  {adjustAfter != null && adjustAfter < 0 && (
+                  {adjustAfterQty != null && adjustAfterQty < 0 && (
                     <p className="text-sm text-red-300">{t('admin.inventory.negativeStockWarn')}</p>
                   )}
                 </div>

@@ -83,6 +83,90 @@ fn backend_boot_log_path() -> PathBuf {
     app_home_dir().join("logs").join("backend_boot.log")
 }
 
+/// Client monoblok: skip local backend and use server API, e.g. `http://192.168.1.10:8000`.
+fn remote_api_base() -> Option<String> {
+    std::env::var("GEEKS_POS_REMOTE_API")
+        .ok()
+        .map(|s| s.trim().trim_end_matches('/').to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Server LAN bind host. Default loopback; set `0.0.0.0` for multi-kassa.
+fn bind_host() -> String {
+    let raw = std::env::var("GEEKS_POS_BIND_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let t = raw.trim();
+    if t.is_empty() {
+        "127.0.0.1".to_string()
+    } else {
+        t.to_string()
+    }
+}
+
+fn parse_http_host_port(base: &str) -> Option<(String, u16)> {
+    let b = base.trim().trim_end_matches('/');
+    let rest = b
+        .strip_prefix("http://")
+        .or_else(|| b.strip_prefix("https://"))?;
+    let authority = rest.split('/').next().unwrap_or(rest);
+    if let Some((host, port_s)) = authority.rsplit_once(':') {
+        let port: u16 = port_s.parse().ok()?;
+        Some((host.to_string(), port))
+    } else {
+        Some((authority.to_string(), 80))
+    }
+}
+
+/// Load `%APPDATA%\GeeksPOS\.env` into process env (does not override existing vars).
+fn load_app_dotenv() {
+    let path = app_home_dir().join(".env");
+    let Ok(text) = fs::read_to_string(&path) else {
+        return;
+    };
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else {
+            continue;
+        };
+        let key = k.trim();
+        if key.is_empty() {
+            continue;
+        }
+        if std::env::var_os(key).is_some() {
+            continue;
+        }
+        let mut val = v.trim().to_string();
+        if (val.starts_with('"') && val.ends_with('"')) || (val.starts_with('\'') && val.ends_with('\''))
+        {
+            val = val[1..val.len().saturating_sub(1)].to_string();
+        }
+        std::env::set_var(key, val);
+    }
+    append_log_line("INFO", &format!("loaded_app_dotenv path={}", path.display()));
+}
+
+fn health_ok_at(host: &str, port: u16) -> bool {
+    if let Ok(mut stream) = TcpStream::connect((host, port)) {
+        let _ = stream.set_read_timeout(Some(Duration::from_millis(2000)));
+        let _ = stream.set_write_timeout(Some(Duration::from_millis(1200)));
+        let req = format!(
+            "GET /api/health/ HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n\r\n"
+        );
+        let _ = stream.write_all(req.as_bytes());
+        let mut buf = String::new();
+        if stream.read_to_string(&mut buf).is_ok() {
+            let has_ok_status_line =
+                buf.starts_with("HTTP/1.1 200") || buf.starts_with("HTTP/1.0 200");
+            let has_ok_payload =
+                buf.contains("\"status\":\"ok\"") || buf.contains("\"status\": \"ok\"");
+            return has_ok_status_line && has_ok_payload;
+        }
+    }
+    false
+}
+
 /// Read backend_boot.log for support hints (e.g. AppRegistryNotReady).
 fn boot_log_failure_hint() -> Option<String> {
     let path = backend_boot_log_path();
@@ -213,6 +297,11 @@ fn post_debt_reminder_auto_run(port: u16) {
 }
 
 fn spawn_notification_flush_loop(app: tauri::AppHandle) {
+    // Client monoblok (remote API): queue flush / debt reminder only on the server process.
+    if remote_api_base().is_some() {
+        append_log_line("INFO", "client_mode skip_notification_flush_loop");
+        return;
+    }
     thread::spawn(move || {
         let mut debt_tick = 0u32;
         loop {
@@ -382,7 +471,8 @@ $backend = '{sidecar_str}'
 $logDir = Join-Path $appHome 'logs'
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $logFile = Join-Path $logDir 'backend_boot.log'
-Start-Process -FilePath $backend -ArgumentList @('--host','127.0.0.1','--port',$port,'--threads','2') -WindowStyle Hidden -RedirectStandardOutput $logFile -RedirectStandardError $logFile
+$bindHost = if ($env:GEEKS_POS_BIND_HOST) { $env:GEEKS_POS_BIND_HOST } else { '127.0.0.1' }
+Start-Process -FilePath $backend -ArgumentList @('--host',$bindHost,'--port',$port,'--threads','2') -WindowStyle Hidden -RedirectStandardOutput $logFile -RedirectStandardError $logFile
 exit 0
 "#
     );
@@ -552,21 +642,8 @@ fn machine_id() -> Result<String, String> {
 }
 
 fn health_ok(port: u16) -> bool {
-    if let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) {
-        let _ = stream.set_read_timeout(Some(Duration::from_millis(2000)));
-        let _ = stream.set_write_timeout(Some(Duration::from_millis(1200)));
-        let req = format!(
-            "GET /api/health/ HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
-        );
-        let _ = stream.write_all(req.as_bytes());
-        let mut buf = String::new();
-        if stream.read_to_string(&mut buf).is_ok() {
-            let has_ok_status_line = buf.starts_with("HTTP/1.1 200") || buf.starts_with("HTTP/1.0 200");
-            let has_ok_payload = buf.contains("\"status\":\"ok\"") || buf.contains("\"status\": \"ok\"");
-            return has_ok_status_line && has_ok_payload;
-        }
-    }
-    false
+    // Local UI always health-checks loopback even when waitress binds 0.0.0.0.
+    health_ok_at("127.0.0.1", port)
 }
 
 fn backend_script_path() -> PathBuf {
@@ -643,9 +720,10 @@ fn attach_waitress_args_and_env(
     secret_key: &str,
     flush_key: &str,
 ) {
+    let host = bind_host();
     cmd.arg(script)
         .arg("--host")
-        .arg("127.0.0.1")
+        .arg(&host)
         .arg("--port")
         .arg(port.to_string())
         .arg("--threads")
@@ -655,7 +733,8 @@ fn attach_waitress_args_and_env(
         .env("DJANGO_SECRET_KEY", secret_key)
         .env("INTERNAL_FLUSH_KEY", flush_key)
         .env("PYTHONUNBUFFERED", "1")
-        .env("WAITRESS_THREADS", waitress_threads);
+        .env("WAITRESS_THREADS", waitress_threads)
+        .env("GEEKS_POS_BIND_HOST", &host);
 }
 
 /// Live Django from the repo (`run_waitress.py`). Used in dev so `receipt.py` etc. apply without rebuilding PyInstaller.
@@ -794,9 +873,10 @@ fn backend_command(app: &tauri::AppHandle, port: u16) -> Result<Command, String>
             "INFO",
             &format!("backend_env DJANGO_DEBUG={django_debug} GEEKS_POS_ALLOW_DB_OVERRIDE={allow_db_override}"),
         );
+        let host = bind_host();
         let mut cmd = Command::new(sidecar);
         cmd.arg("--host")
-            .arg("127.0.0.1")
+            .arg(&host)
             .arg("--port")
             .arg(port.to_string())
             .arg("--threads")
@@ -806,7 +886,8 @@ fn backend_command(app: &tauri::AppHandle, port: u16) -> Result<Command, String>
             .env("DJANGO_SECRET_KEY", &secret_key)
             .env("INTERNAL_FLUSH_KEY", &flush_key)
             .env("PYTHONUNBUFFERED", "1")
-            .env("WAITRESS_THREADS", &waitress_threads);
+            .env("WAITRESS_THREADS", &waitress_threads)
+            .env("GEEKS_POS_BIND_HOST", &host);
         return Ok(cmd);
     }
 
@@ -840,6 +921,16 @@ fn backend_command(app: &tauri::AppHandle, port: u16) -> Result<Command, String>
 /// Spawn backend sidecar if needed. Does not block on health (UI shows boot loader).
 fn spawn_backend_if_needed(app: &tauri::AppHandle, state: &BackendState) -> Result<(), String> {
     append_log_line("INFO", "bootstrap_spawn_started");
+    if let Some(remote) = remote_api_base() {
+        append_log_line(
+            "INFO",
+            &format!("client_mode skip_local_backend remote_api={remote}"),
+        );
+        if let Ok(mut g) = state.bootstrap_error.lock() {
+            *g = None;
+        }
+        return Ok(());
+    }
     let selected_port = pick_backend_port(8000);
     if let Ok(mut lock) = state.port.lock() {
         *lock = selected_port;
@@ -916,6 +1007,25 @@ fn spawn_backend_if_needed(app: &tauri::AppHandle, state: &BackendState) -> Resu
 }
 
 fn wait_for_backend_ready(state: &BackendState) -> Result<(), String> {
+    if let Some(remote) = remote_api_base() {
+        let (host, port) = parse_http_host_port(&remote).ok_or_else(|| {
+            format!("GEEKS_POS_REMOTE_API noto‘g‘ri: {remote} (masalan http://192.168.1.10:8000)")
+        })?;
+        for _ in 0..70 {
+            if health_ok_at(&host, port) {
+                append_log_line("INFO", "health_ok_remote_api");
+                if let Ok(mut g) = state.bootstrap_error.lock() {
+                    *g = None;
+                }
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(500));
+        }
+        return Err(format!(
+            "Masofaviy serverga ulanish muvaffaqiyatsiz: {remote}/api/health/. LAN/firewall/serverni tekshiring."
+        ));
+    }
+
     let selected_port = *state
         .port
         .lock()
@@ -981,10 +1091,14 @@ fn ensure_backend_started(app: &tauri::AppHandle, state: &BackendState) -> Resul
 
 #[tauri::command]
 fn get_backend_base_url(state: tauri::State<BackendState>) -> Result<String, String> {
+    if let Some(remote) = remote_api_base() {
+        return Ok(remote);
+    }
     let port = state
         .port
         .lock()
         .map_err(|_| "Backend port mutex poisoned".to_string())?;
+    // UI on the server machine always uses loopback, even if waitress binds 0.0.0.0.
     let base = format!("http://127.0.0.1:{}", *port);
     Ok(base)
 }
@@ -1334,6 +1448,7 @@ fn ensure_webview2_runtime() -> Result<(), String> {
 }
 
 fn main() {
+    load_app_dotenv();
     let state = BackendState {
         child: Mutex::new(None),
         port: Mutex::new(8000),

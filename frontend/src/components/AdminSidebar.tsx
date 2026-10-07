@@ -7,7 +7,6 @@ import {
   History,
   Settings,
   LogOut,
-  PackageSearch,
   LineChart,
   Landmark,
   RotateCcw,
@@ -33,21 +32,29 @@ export type Section =
   | 'returns'
   | 'suppliers'
 
+/** Admin nav: stock+inventory merged into one «Ombor» (inventory). Settings pinned in footer. */
 const ITEMS: Array<{ id: Section; labelKey: string; icon: LucideIcon }> = [
   { id: 'dashboard', labelKey: 'admin.sidebar.dashboard', icon: LayoutDashboard },
   { id: 'pos', labelKey: 'admin.sidebar.pos', icon: ShoppingCart },
   { id: 'shift', labelKey: 'admin.sidebar.shift', icon: LineChart },
   { id: 'expenses', labelKey: 'admin.sidebar.expenses', icon: Landmark },
-  { id: 'stock', labelKey: 'admin.sidebar.stock', icon: PackageSearch },
-  { id: 'inventory', labelKey: 'admin.sidebar.inventory', icon: Package },
+  { id: 'inventory', labelKey: 'admin.sidebar.warehouse', icon: Package },
   { id: 'catalog', labelKey: 'admin.sidebar.catalog', icon: Tags },
   { id: 'suppliers', labelKey: 'admin.sidebar.suppliers', icon: Truck },
   { id: 'debts', labelKey: 'admin.sidebar.debts', icon: Wallet },
   { id: 'returns', labelKey: 'admin.sidebar.returns', icon: RotateCcw },
   { id: 'sales', labelKey: 'admin.sidebar.sales', icon: History },
-  { id: 'settings', labelKey: 'admin.sidebar.settings', icon: Settings },
 ]
-const CASHIER_MENU: Section[] = ['pos', 'sales', 'debts', 'expenses', 'shift', 'stock']
+
+/** Cashier: stock list only (no kirim hub). */
+const CASHIER_ITEMS: Array<{ id: Section; labelKey: string; icon: LucideIcon }> = [
+  { id: 'pos', labelKey: 'admin.sidebar.pos', icon: ShoppingCart },
+  { id: 'sales', labelKey: 'admin.sidebar.sales', icon: History },
+  { id: 'debts', labelKey: 'admin.sidebar.debts', icon: Wallet },
+  { id: 'expenses', labelKey: 'admin.sidebar.expenses', icon: Landmark },
+  { id: 'shift', labelKey: 'admin.sidebar.shift', icon: LineChart },
+  { id: 'stock', labelKey: 'admin.sidebar.stock', icon: Package },
+]
 
 export function AdminSidebar({
   active,
@@ -66,14 +73,40 @@ export function AdminSidebar({
 }) {
   const { t } = useTranslation()
   const collapsed = layout === 'collapsed'
-  const visibleItems =
-    role === 'CASHIER'
-      ? ITEMS.filter((item) => CASHIER_MENU.includes(item.id))
-      : ITEMS
+  const visibleItems = role === 'CASHIER' ? CASHIER_ITEMS : ITEMS
 
   const toggleLabel = collapsed
     ? t('admin.sidebar.expand', { defaultValue: 'Menyuni ochish' })
     : t('admin.sidebar.collapse', { defaultValue: 'Menyuni yigʻish' })
+
+  const navBtn = (opts: {
+    id: string
+    label: string
+    icon: LucideIcon
+    isActive: boolean
+    onClick: () => void
+  }) => {
+    const Icon = opts.icon
+    return (
+      <button
+        key={opts.id}
+        type="button"
+        onClick={opts.onClick}
+        title={collapsed ? opts.label : undefined}
+        aria-label={opts.label}
+        className={`touch-btn w-full flex items-center rounded-xl text-left text-kiosk-sm pos-lg:text-sm border ${
+          collapsed ? 'justify-center min-h-kiosk-touch min-w-kiosk-touch px-0 py-0' : 'gap-3 px-3 py-3 min-h-kiosk-touch'
+        } ${
+          opts.isActive
+            ? 'bg-emerald-700 border-emerald-400 ring-2 ring-emerald-500/50 text-white'
+            : 'bg-slate-900 border-slate-700 text-slate-100 hover:bg-slate-800'
+        }`}
+      >
+        <Icon className={`shrink-0 opacity-90 ${collapsed ? 'h-6 w-6' : 'h-5 w-5'}`} aria-hidden />
+        {!collapsed && <span className="font-medium leading-tight">{opts.label}</span>}
+      </button>
+    )
+  }
 
   return (
     <aside
@@ -107,32 +140,25 @@ export function AdminSidebar({
           collapsed ? 'pr-0' : 'pr-1'
         }`}
       >
-        {visibleItems.map((item) => {
-          const Icon = item.icon
-          const isActive = active === item.id
-          const label = t(item.labelKey)
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => onSelect(item.id)}
-              title={collapsed ? label : undefined}
-              aria-label={label}
-              className={`touch-btn w-full flex items-center rounded-xl text-left text-kiosk-sm pos-lg:text-sm border ${
-                collapsed ? 'justify-center min-h-kiosk-touch min-w-kiosk-touch px-0 py-0' : 'gap-3 px-3 py-3 min-h-kiosk-touch'
-              } ${
-                isActive
-                  ? 'bg-emerald-700 border-emerald-400 ring-2 ring-emerald-500/50 text-white'
-                  : 'bg-slate-900 border-slate-700 text-slate-100 hover:bg-slate-800'
-              }`}
-            >
-              <Icon className={`shrink-0 opacity-90 ${collapsed ? 'h-6 w-6' : 'h-5 w-5'}`} aria-hidden />
-              {!collapsed && <span className="font-medium leading-tight">{label}</span>}
-            </button>
-          )
-        })}
+        {visibleItems.map((item) =>
+          navBtn({
+            id: item.id,
+            label: t(item.labelKey),
+            icon: item.icon,
+            isActive: active === item.id || (item.id === 'inventory' && active === 'stock' && role !== 'CASHIER'),
+            onClick: () => onSelect(item.id),
+          }),
+        )}
       </nav>
       <div className="mt-auto pt-3 border-t border-slate-800 space-y-2 shrink-0">
+        {role !== 'CASHIER' &&
+          navBtn({
+            id: 'settings',
+            label: t('admin.sidebar.settings'),
+            icon: Settings,
+            isActive: active === 'settings',
+            onClick: () => onSelect('settings'),
+          })}
         <button
           type="button"
           className={`touch-btn w-full flex items-center rounded-xl text-kiosk-sm pos-lg:text-sm border bg-slate-900 border-slate-700 text-slate-100 hover:bg-slate-800 min-h-kiosk-touch ${

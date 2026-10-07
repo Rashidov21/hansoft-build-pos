@@ -1365,32 +1365,37 @@ export function PosPage({
               {t('pos.activeSessions', { defaultValue: 'Faol navbatlar' })}: {suspendedCarts.length}
             </span>
           </div>
-          <div className="inline-flex rounded-xl border border-slate-600 overflow-hidden shrink-0">
-            <button
-              type="button"
-              className={`touch-btn min-h-9 px-3 text-xs font-semibold ${
-                priceMode === 'retail'
-                  ? 'bg-emerald-700 text-white'
-                  : 'bg-slate-800 text-slate-300'
-              }`}
-              onClick={() => setPriceMode('retail')}
-            >
-              {t('pos.priceRetail', { defaultValue: 'Chakana' })}
-            </button>
-            <button
-              type="button"
-              className={`touch-btn min-h-9 px-3 text-xs font-semibold ${
-                priceMode === 'wholesale'
-                  ? 'bg-amber-700 text-white'
-                  : 'bg-slate-800 text-slate-300'
-              }`}
-              onClick={() => setPriceMode('wholesale')}
-              title={t('pos.priceWholesaleHint', {
-                defaultValue: 'Faqat ulgurji narxi bor tovarlarga qo‘llanadi',
-              })}
-            >
-              {t('pos.priceWholesale', { defaultValue: 'Ulgurji' })}
-            </button>
+          <div className="flex flex-col items-end gap-0.5 shrink-0">
+            <span className="text-[10px] uppercase tracking-wide text-slate-500">
+              {t('pos.priceModeDefault', { defaultValue: 'Yangi qator' })}
+            </span>
+            <div className="inline-flex rounded-xl border border-slate-600 overflow-hidden">
+              <button
+                type="button"
+                className={`touch-btn min-h-9 px-3 text-xs font-semibold ${
+                  priceMode === 'retail'
+                    ? 'bg-emerald-700 text-white'
+                    : 'bg-slate-800 text-slate-300'
+                }`}
+                onClick={() => setPriceMode('retail')}
+              >
+                {t('pos.priceRetail', { defaultValue: 'Chakana' })}
+              </button>
+              <button
+                type="button"
+                className={`touch-btn min-h-9 px-3 text-xs font-semibold ${
+                  priceMode === 'wholesale'
+                    ? 'bg-amber-700 text-white'
+                    : 'bg-slate-800 text-slate-300'
+                }`}
+                onClick={() => setPriceMode('wholesale')}
+                title={t('pos.priceWholesaleHint', {
+                  defaultValue: 'Faqat ulgurji narxi bor tovarlarga qo‘llanadi',
+                })}
+              >
+                {t('pos.priceWholesale', { defaultValue: 'Ulgurji' })}
+              </button>
+            </div>
           </div>
           <button
             type="button"
@@ -1581,19 +1586,19 @@ export function PosPage({
           )}
 
           <div
-            className={`rounded-xl border overflow-x-auto kiosk-scrollbar transition-colors ${
+            className={`rounded-xl border transition-colors ${
               cart.length === 0 ? 'hidden' : ''
             } ${cartFlash ? 'border-emerald-500' : 'border-slate-800'}`}
           >
-            <table className="w-full text-sm min-w-[20rem]">
+            <table className="w-full text-sm table-fixed">
               <thead className="bg-slate-900 text-slate-400">
                 <tr>
-                  <th className="text-left p-3">{t('cart.title')}</th>
+                  <th className="text-left p-3 w-[42%]">{t('cart.title')}</th>
                   {showPurchasePrice && (
-                    <th className="text-right p-3 whitespace-nowrap">{t('admin.catalog.purchasePrice')}</th>
+                    <th className="text-right p-3 whitespace-nowrap w-[18%]">{t('admin.catalog.purchasePrice')}</th>
                   )}
-                  <th className="p-3">{t('cart.qty')}</th>
-                  <th className="text-right p-3">{t('cart.sum')}</th>
+                  <th className="p-3 w-[22%]">{t('cart.qty')}</th>
+                  <th className="text-right p-3 w-[18%]">{t('cart.sum')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1696,7 +1701,7 @@ export function PosPage({
                       <div
                         ref={idx === cart.length - 1 ? lastQtyCellRef : undefined}
                         tabIndex={idx === cart.length - 1 ? 0 : -1}
-                        className="inline-flex items-center gap-2 outline-none rounded-lg focus-visible:ring-2 focus-visible:ring-emerald-500"
+                        className="inline-flex flex-wrap items-center justify-center gap-1.5 outline-none rounded-lg focus-visible:ring-2 focus-visible:ring-emerald-500"
                         onClick={(e) => e.stopPropagation()}
                       >
                         <button
@@ -2014,64 +2019,13 @@ export function PosPage({
               <span className="text-kiosk-lg pos-lg:text-3xl font-bold tabular-nums truncate">{formatMoney(grand)}</span>
             </div>
 
-            <div className="grid grid-cols-3 gap-2 max-sm:hidden pos-lg:hidden">
+            <div className="grid grid-cols-3 gap-2">
               {(['CASH', 'CARD', 'DEBT'] as PayMode[]).map((m) => (
                 <button
                   key={`dock-${m}`}
                   type="button"
                   onClick={() => setActiveMethod(m)}
-                  title={
-                    m === 'CASH'
-                      ? t('pay.mode.cash')
-                      : m === 'CARD'
-                        ? t('pay.mode.card')
-                        : t('pay.mode.debt')
-                  }
-                  className={`touch-btn min-h-kiosk-touch rounded-lg text-kiosk-sm font-semibold border ${
-                    payMode === m
-                      ? m === 'CASH'
-                        ? 'bg-emerald-700 border-emerald-500'
-                        : m === 'CARD'
-                          ? 'bg-sky-700 border-sky-500'
-                          : 'bg-amber-700 border-amber-500'
-                      : 'bg-slate-800 border-slate-600'
-                  }`}
-                >
-                  {m === 'CASH' && 'F1'}
-                  {m === 'CARD' && 'F2'}
-                  {m === 'DEBT' && 'F3'}
-                </button>
-              ))}
-            </div>
-            <div className="hidden pos-lg:grid grid-cols-3 gap-2">
-              {(['CASH', 'CARD', 'DEBT'] as PayMode[]).map((m) => (
-                <button
-                  key={`dock-lg-${m}`}
-                  type="button"
-                  onClick={() => setActiveMethod(m)}
-                  className={`touch-btn min-h-kiosk-touch px-2 rounded-lg text-kiosk-sm font-medium border ${
-                    payMode === m
-                      ? m === 'CASH'
-                        ? 'bg-emerald-700 border-emerald-500'
-                        : m === 'CARD'
-                          ? 'bg-sky-700 border-sky-500'
-                          : 'bg-amber-700 border-amber-500'
-                      : 'bg-slate-800 border-slate-600'
-                  }`}
-                >
-                  {m === 'CASH' && `F1 ${t('pay.mode.cash')}`}
-                  {m === 'CARD' && `F2 ${t('pay.mode.card')}`}
-                  {m === 'DEBT' && `F3 ${t('pay.mode.debt')}`}
-                </button>
-              ))}
-            </div>
-            <div className="hidden max-sm:grid grid-cols-3 gap-2">
-              {(['CASH', 'CARD', 'DEBT'] as PayMode[]).map((m) => (
-                <button
-                  key={`dock-sm-${m}`}
-                  type="button"
-                  onClick={() => setActiveMethod(m)}
-                  className={`touch-btn min-h-kiosk-touch px-2 rounded-lg text-kiosk-sm font-medium border ${
+                  className={`touch-btn min-h-kiosk-touch px-1.5 rounded-lg text-kiosk-sm font-medium border ${
                     payMode === m
                       ? m === 'CASH'
                         ? 'bg-emerald-700 border-emerald-500'

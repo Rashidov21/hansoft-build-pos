@@ -25,8 +25,9 @@ export function qtyStep(unit: ProductUnit): number {
   return isIntegerUnit(unit) ? 1 : 0.1
 }
 
-export function defaultSaleQty(unit: ProductUnit): number {
-  return isIntegerUnit(unit) ? 1 : 0.1
+/** Default cart qty when adding a line — always 1 for build materials (step may still be 0.1). */
+export function defaultSaleQty(_unit: ProductUnit): number {
+  return 1
 }
 
 export function parseQty(value: unknown): number {

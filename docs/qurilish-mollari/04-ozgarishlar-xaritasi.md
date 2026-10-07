@@ -57,7 +57,10 @@ Bosqichlar: [06-bosqichlar.md](./06-bosqichlar.md).
 
 | Joy | O‘zgarish |
 |-----|-----------|
-| docs (shu papka yoki `docs/MONOBLOCK_OPS.md`) | LAN: server bind, client URL, firewall, SQLite WAL |
+| `07-multi-kassa-ops.md` | LAN qadamlar, smoke, SQLite cheklov |
+| `GEEKS_POS_BIND_HOST` / `GEEKS_POS_REMOTE_API` | Server LAN bind; client remote API |
+| `DJANGO_ALLOWED_HOSTS` | LAN IP ruxsati |
+| SQLite WAL | `core/apps.py` (mavjud) + test |
 
 ## Tegilmasin (asosiy refaktor yo‘q)
 
