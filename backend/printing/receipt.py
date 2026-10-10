@@ -759,8 +759,8 @@ def resolve_receipt_render_mode(settings: StoreSettings | None = None) -> str:
         return env
     if settings is None:
         settings = StoreSettings.get_solo()
-    mode = (getattr(settings, "receipt_render_mode", None) or "text").strip().lower()
-    return "image" if mode == "image" else "text"
+    mode = (getattr(settings, "receipt_render_mode", None) or "image").strip().lower()
+    return "text" if mode == "text" else "image"
 
 
 def _emit_text_manual_encoded(printer: object, text: str, codepage: str) -> bool:

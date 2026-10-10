@@ -4,6 +4,7 @@ import { MoreVertical, PackagePlus, Pencil, Power, Trash2, Tags, RotateCcw, Plus
 import {
   fetchLabelEscpos,
   fetchLabelQueueEscpos,
+  fetchVariantByBarcode,
   type BulkGridCell,
   type Category,
   type LabelStickerSize,
@@ -40,6 +41,7 @@ const GRID =
 type CreateForm = {
   productCategory: string
   name: string
+  barcode: string
   unit: ProductUnit
   purchase: string
   list: string
@@ -50,6 +52,7 @@ type CreateForm = {
 const EMPTY_FORM: CreateForm = {
   productCategory: '',
   name: '',
+  barcode: '',
   unit: 'dona',
   purchase: '',
   list: '',
@@ -379,6 +382,7 @@ export function CatalogPage({
 
   async function submitCreate() {
     const name = form.name.trim()
+    const barcode = form.barcode.trim()
     if (!form.productCategory) {
       err(t('admin.catalog.honey.needCategory'))
       return
@@ -399,6 +403,22 @@ export function CatalogPage({
 
     setBusy(true)
     try {
+      if (barcode) {
+        try {
+          await fetchVariantByBarcode(barcode)
+          err(t('admin.catalog.barcodeAlreadyUsed', { code: barcode }))
+          setBusy(false)
+          return
+        } catch (e: unknown) {
+          const code = (e as Error & { code?: string }).code
+          if (code && code !== 'BARCODE_NOT_FOUND') {
+            err(t(`err.${code}`, { defaultValue: t('admin.catalog.wizard.bulkError') }))
+            setBusy(false)
+            return
+          }
+          // 404 / BARCODE_NOT_FOUND → free to use
+        }
+      }
       const categoryId = await ensureDefaultCategory()
       const product = await onCreateProduct({
         category: categoryId,
@@ -415,6 +435,7 @@ export function CatalogPage({
             wholesale_price: wholesale || undefined,
             initial_qty: qty,
             unit: form.unit,
+            ...(barcode ? { barcode } : {}),
           },
         ],
       })
@@ -701,6 +722,26 @@ export function CatalogPage({
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
               />
+            </label>
+
+            <label className="space-y-1 block">
+              <span className="text-xs text-slate-400">{t('admin.catalog.barcodeOptional')}</span>
+              <input
+                className={`${INPUT_CLS} font-mono`}
+                inputMode="numeric"
+                autoComplete="off"
+                placeholder={t('admin.catalog.barcodePlaceholder')}
+                value={form.barcode}
+                onChange={(e) => setForm({ ...form, barcode: e.target.value.replace(/\s/g, '') })}
+                onKeyDown={(e) => {
+                  // USB scanner usually ends with Enter — keep focus for next field / submit.
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    ;(e.currentTarget as HTMLInputElement).blur()
+                  }
+                }}
+              />
+              <p className="text-xs text-slate-500">{t('admin.catalog.barcodeScanHint')}</p>
             </label>
 
             <div className="space-y-1">

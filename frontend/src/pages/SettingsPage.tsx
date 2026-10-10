@@ -124,7 +124,7 @@ export function SettingsPage({
     label_direction: settings?.label_direction ?? 1,
     receipt_width: settings?.receipt_width ?? '58mm',
     receipt_font_size: settings?.receipt_font_size ?? 0,
-    receipt_render_mode: (settings?.receipt_render_mode === 'image' ? 'image' : 'text') as 'text' | 'image',
+    receipt_render_mode: (settings?.receipt_render_mode === 'text' ? 'text' : 'image') as 'text' | 'image',
     receipt_printing_enabled: settings?.receipt_printing_enabled ?? false,
     auto_print_on_sale: settings?.auto_print_on_sale ?? true,
     scanner_mode: settings?.scanner_mode ?? 'keyboard',
@@ -190,7 +190,7 @@ export function SettingsPage({
       label_direction: settings?.label_direction ?? 1,
       receipt_width: settings?.receipt_width ?? '58mm',
       receipt_font_size: settings?.receipt_font_size ?? 0,
-      receipt_render_mode: (settings?.receipt_render_mode === 'image' ? 'image' : 'text') as 'text' | 'image',
+      receipt_render_mode: (settings?.receipt_render_mode === 'text' ? 'text' : 'image') as 'text' | 'image',
       receipt_printing_enabled: settings?.receipt_printing_enabled ?? false,
       auto_print_on_sale: settings?.auto_print_on_sale ?? true,
       scanner_mode: settings?.scanner_mode ?? 'keyboard',
@@ -281,9 +281,15 @@ export function SettingsPage({
     [printerOptions, form.label_printer_name],
   )
 
+  const printersSameQueue =
+    Boolean(form.receipt_printer_name.trim()) &&
+    Boolean(form.label_printer_name.trim()) &&
+    form.receipt_printer_name.trim().toLowerCase() === form.label_printer_name.trim().toLowerCase()
+
   const hardwareAlert =
     (form.receipt_printing_enabled && receiptHw === 'missing') ||
-    (form.label_printing_enabled && labelHw === 'missing')
+    (form.label_printing_enabled && labelHw === 'missing') ||
+    printersSameQueue
       ? 'err'
       : (form.receipt_printing_enabled && receiptHw === 'no_device_list') ||
           (form.label_printing_enabled && labelHw === 'no_device_list')
@@ -488,21 +494,6 @@ export function SettingsPage({
                     placeholder={t('admin.settings.footerExample')}
                   />
                 </div>
-                <div className="space-y-1">
-                  <label className="block text-xs text-slate-400">
-                    {t('admin.settings.receiptLanguage')}
-                  </label>
-                  <select
-                    className={inputCls}
-                    value={form.receipt_lang || ''}
-                    onChange={(e) => setForm({ ...form, receipt_lang: e.target.value })}
-                  >
-                    <option value="">{t('admin.settings.receiptLanguageAuto')}</option>
-                    <option value="uz">{t('admin.settings.receiptLangUz')}</option>
-                    <option value="ru">{t('admin.settings.receiptLangRu')}</option>
-                    <option value="ky">{t('admin.settings.receiptLangKy')}</option>
-                  </select>
-                </div>
               </div>
             </div>
             <div
@@ -538,6 +529,9 @@ export function SettingsPage({
                   </li>
                 ) : (
                   <li>{t('admin.settings.statusLabelDisabled')}</li>
+                )}
+                {printersSameQueue && (
+                  <li>{t('err.PRINTER_SAME_QUEUE', { printer: form.receipt_printer_name.trim() })}</li>
                 )}
               </ul>
             </div>
@@ -719,6 +713,31 @@ export function SettingsPage({
                   </div>
                   <div className="space-y-1">
                     <label className="block text-xs text-slate-400">
+                      {t('admin.settings.receiptLanguage')}
+                    </label>
+                    <select
+                      className={inputSoftCls}
+                      value={form.receipt_lang || ''}
+                      onChange={(e) => {
+                        const lang = e.target.value
+                        setForm({
+                          ...form,
+                          receipt_lang: lang,
+                          // Rus/kirill matn: RAW codepage ko‘pincha xitoycha chiqadi → rasm.
+                          ...(lang === 'ru' ? { receipt_render_mode: 'image' as const } : {}),
+                        })
+                      }}
+                    >
+                      <option value="">{t('admin.settings.receiptLanguageAuto')}</option>
+                      <option value="uz">{t('admin.settings.receiptLangUz')}</option>
+                      <option value="ru">{t('admin.settings.receiptLangRu')}</option>
+                    </select>
+                    <p className="text-xs text-slate-500 leading-snug">
+                      {t('admin.settings.receiptLanguageHelp')}
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-xs text-slate-400">
                       {t('admin.settings.receiptRenderMode')}
                     </label>
                     <select
@@ -731,8 +750,8 @@ export function SettingsPage({
                         })
                       }
                     >
-                      <option value="text">{t('admin.settings.receiptRenderModeText')}</option>
                       <option value="image">{t('admin.settings.receiptRenderModeImage')}</option>
+                      <option value="text">{t('admin.settings.receiptRenderModeText')}</option>
                     </select>
                     <p className="text-xs text-slate-500 leading-snug">
                       {form.receipt_render_mode === 'image'

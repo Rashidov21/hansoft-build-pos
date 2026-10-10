@@ -77,10 +77,11 @@ class StoreSettings(models.Model):
     # 0 => auto defaults (80mm=26, 58mm=22). Positive value overrides bitmap receipt font size.
     receipt_font_size = models.PositiveSmallIntegerField(default=0)
     # text = ESC/POS codepage bytes; image = Pillow bitmap (avoids Chinese firmware codepage bugs).
+    # Default image: Cyrillic-safe on XP-80C Chinese firmware (build-pos / qurilish mollari).
     receipt_render_mode = models.CharField(
         max_length=8,
         choices=ReceiptRenderMode.choices,
-        default=ReceiptRenderMode.TEXT,
+        default=ReceiptRenderMode.IMAGE,
         help_text="How receipt body is sent: RAW text or bitmap image",
     )
     # Master switch: when False, POS never prints receipts and receipt printer UI is hidden.

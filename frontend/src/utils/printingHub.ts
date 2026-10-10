@@ -22,20 +22,8 @@ type PrinterSettingsLike = {
   label_printer_port?: string
 }
 
-const RECEIPT_FALLBACK_MODEL = 'XP-80C'
-const LABEL_FALLBACK_MODEL = 'XP-365B'
-
 function normalize(value: string): string {
   return value.trim().toLowerCase()
-}
-
-function findByNameOrModel(printers: string[], expected: string): string | null {
-  const needle = normalize(expected)
-  if (!needle) return null
-  const exact = printers.find((p) => normalize(p) === needle)
-  if (exact) return exact
-  const partial = printers.find((p) => normalize(p).includes(needle))
-  return partial ?? null
 }
 
 function chooseConfiguredName(kind: PrintKind, settings: PrinterSettingsLike | null): string {
@@ -48,49 +36,76 @@ function chooseConfiguredPort(kind: PrintKind, settings: PrinterSettingsLike | n
   return (settings?.label_printer_port || '').trim()
 }
 
-function fallbackModel(kind: PrintKind): string {
-  return kind === 'receipt' ? RECEIPT_FALLBACK_MODEL : LABEL_FALLBACK_MODEL
+function otherKindName(kind: PrintKind, settings: PrinterSettingsLike | null): string {
+  if (kind === 'receipt') return (settings?.label_printer_name || '').trim()
+  return (settings?.receipt_printer_name || '').trim()
 }
 
-/** Windows queue name used for the job (for toasts / support). */
+function findExact(printers: string[], expected: string): string | null {
+  const needle = normalize(expected)
+  if (!needle) return null
+  return printers.find((p) => normalize(p) === needle) ?? null
+}
+
+/** Partial match only when exactly one installed printer matches (avoids XP-80C/365B mix-ups). */
+function findUniquePartial(printers: string[], expected: string): string | null {
+  const needle = normalize(expected)
+  if (!needle) return null
+  const matches = printers.filter((p) => normalize(p).includes(needle))
+  return matches.length === 1 ? matches[0] : null
+}
+
+function assertNotOtherQueue(chosen: string, other: string): void {
+  if (other && normalize(chosen) === normalize(other)) {
+    throw new Error(i18n.t('err.PRINTER_SAME_QUEUE', { printer: chosen }))
+  }
+}
+
+/**
+ * Strict routing: each job kind uses only its configured Windows queue.
+ * No model fallback (XP-80C / XP-365B), no OS default, no cross-kind reuse.
+ */
 export async function dispatchPrint({ payloadBase64, kind, settings }: DispatchOptions): Promise<string> {
   const configured = chooseConfiguredName(kind, settings)
   const configuredPort = chooseConfiguredPort(kind, settings)
+  const other = otherKindName(kind, settings)
+
+  if (!configured) {
+    throw new Error(
+      i18n.t(kind === 'label' ? 'err.LABEL_PRINTER_NOT_CONFIGURED' : 'err.RECEIPT_PRINTER_NOT_CONFIGURED'),
+    )
+  }
+  assertNotOtherQueue(configured, other)
+
   const printers = await listInstalledPrinters()
 
-  // Empty OS printer list: strict if nothing configured (avoid silent default spooler),
-  // soft path when a name is set in store settings (still try that queue).
   if (printers.length === 0) {
-    if (configured) {
-      try {
-        await printRawBase64(payloadBase64, configured)
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err || '')
-        throw new Error(
-          i18n.t('err.PRINTER_QUEUE_FAILED', { printer: configured }) + (detail ? `: ${detail}` : ''),
-        )
-      }
-      return configured
+    try {
+      await printRawBase64(payloadBase64, configured)
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err || '')
+      throw new Error(
+        i18n.t('err.PRINTER_QUEUE_FAILED', { printer: configured }) + (detail ? `: ${detail}` : ''),
+      )
     }
-    throw new Error(i18n.t('err.PRINTER_NOT_CONFIGURED_WINDOWS'))
+    return configured
   }
 
-  let chosen: string | null = null
-
-  // Prefer explicit queue name from settings; port hint is secondary (avoids wrong USB match).
-  chosen = findByNameOrModel(printers, configured)
+  let chosen = findExact(printers, configured)
+  if (!chosen) {
+    chosen = findUniquePartial(printers, configured)
+  }
   if (!chosen && configuredPort) {
-    const byPort = printers.find((p) => normalize(p).includes(normalize(configuredPort)))
-    if (byPort) chosen = byPort
-  }
-  if (!chosen) {
-    chosen = findByNameOrModel(printers, fallbackModel(kind))
+    const byPort = printers.filter((p) => normalize(p).includes(normalize(configuredPort)))
+    if (byPort.length === 1) {
+      chosen = byPort[0]
+    }
   }
 
   if (!chosen) {
-    const missing = configured || fallbackModel(kind)
-    throw new Error(i18n.t('err.PRINTER_NOT_CONNECTED', { name: missing }))
+    throw new Error(i18n.t('err.PRINTER_NOT_CONNECTED', { name: configured }))
   }
+  assertNotOtherQueue(chosen, other)
 
   try {
     await printRawBase64(payloadBase64, chosen)
