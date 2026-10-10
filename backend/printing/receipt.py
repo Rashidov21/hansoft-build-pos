@@ -41,14 +41,44 @@ def label_currency_suffix(lang: str, *, ascii_only: bool = False) -> str:
 
 
 def _label_custom_name(product, store_lang: str) -> str:
-    """Sticker line: product custom name only (uz or ru by store receipt language)."""
+    """
+    Sticker product line: custom name if set, else catalog name
+    (uz / uz-cyrillic / ru by store receipt language).
+    """
     rl = _normalize_lang(store_lang)
     if rl == "ru":
-        return (getattr(product, "custom_name_ru", None) or "").strip()
+        custom = (getattr(product, "custom_name_ru", None) or "").strip()
+        if custom:
+            return custom
+        return (
+            getattr(product, "name_ru", None) or getattr(product, "name_uz", None) or ""
+        ).strip()
     cy = (getattr(product, "custom_name_uz_cyrillic", None) or "").strip()
     if cy:
         return cy
-    return (getattr(product, "custom_name_uz", None) or "").strip()
+    custom = (getattr(product, "custom_name_uz", None) or "").strip()
+    if custom:
+        return custom
+    name_cy = (getattr(product, "name_uz_cyrillic", None) or "").strip()
+    if name_cy:
+        return name_cy
+    return (
+        getattr(product, "name_uz", None) or getattr(product, "name_ru", None) or ""
+    ).strip()
+
+
+LABEL_SIZE_CHOICES = frozenset({"30x20", "40x30", "40x50", "50x40", "58mm"})
+
+
+def resolve_label_size(settings, requested: str | None = None) -> str:
+    """Request size, else store default_label_size, else 40x30."""
+    raw = (requested or "").strip().lower()
+    if raw in LABEL_SIZE_CHOICES:
+        return raw
+    fallback = (getattr(settings, "default_label_size", None) or "40x30").strip().lower()
+    if fallback in LABEL_SIZE_CHOICES:
+        return fallback
+    return "40x30"
 
 
 def _label_sell_price(variant):
@@ -200,6 +230,91 @@ def transliterate_uz(text: str) -> str:
     return out
 
 
+# Russian + Uzbek Cyrillic → Latin (TSPL built-in TEXT is ASCII-only on XP-365B).
+_CYRILLIC_TO_LATIN = {
+    "а": "a",
+    "б": "b",
+    "в": "v",
+    "г": "g",
+    "д": "d",
+    "е": "e",
+    "ё": "yo",
+    "ж": "zh",
+    "з": "z",
+    "и": "i",
+    "й": "y",
+    "к": "k",
+    "л": "l",
+    "м": "m",
+    "н": "n",
+    "о": "o",
+    "п": "p",
+    "р": "r",
+    "с": "s",
+    "т": "t",
+    "у": "u",
+    "ф": "f",
+    "х": "x",
+    "ц": "ts",
+    "ч": "ch",
+    "ш": "sh",
+    "щ": "sch",
+    "ъ": "",
+    "ы": "y",
+    "ь": "",
+    "э": "e",
+    "ю": "yu",
+    "я": "ya",
+    # Uzbek Cyrillic extras
+    "ў": "o'",
+    "ғ": "g'",
+    "қ": "q",
+    "ҳ": "h",
+    "ӣ": "i",
+    "ӯ": "u",
+    "җ": "j",
+    "ң": "ng",
+    "ә": "a",
+    "ө": "o",
+    "ү": "u",
+    "ґ": "g",
+    "є": "ye",
+    "і": "i",
+    "ї": "yi",
+}
+
+
+def cyrillic_to_latin(text: str) -> str:
+    """Map Cyrillic letters to Latin; leave Latin/digits/punctuation as-is."""
+    out: list[str] = []
+    for ch in text or "":
+        low = ch.lower()
+        mapped = _CYRILLIC_TO_LATIN.get(low)
+        if mapped is None:
+            out.append(ch)
+            continue
+        if ch.isupper() and mapped:
+            # First letter upper; digraphs like "Sh", "Yo"
+            out.append(mapped[0].upper() + mapped[1:])
+        else:
+            out.append(mapped)
+    return "".join(out)
+
+
+def prepare_tspl_label_text(text: str, *, max_len: int = 28) -> str:
+    """
+    Product line for TSPL TEXT quotes: apostrophe normalize → full Cyrillic
+    translit → ASCII-only, truncated. Empty → '-'.
+    """
+    t = (text or "").replace('"', " ").replace("\r", " ").replace("\n", " ").strip()
+    t = transliterate_uz(t)
+    t = cyrillic_to_latin(t)
+    if len(t) > max_len:
+        t = t[:max_len].rstrip()
+    out = t.encode("ascii", errors="ignore").decode("ascii").strip()
+    return out if out else "-"
+
+
 def _line_80mm(left: str, right: str, width: int = 42) -> str:
     left = left[: width - 1]
     right = right[: width - 1]
@@ -339,7 +454,7 @@ def build_nakladnoy_dict(
     note: str = "",
 ) -> dict:
     """Build print DTO for pick-list (no Sale / no stock)."""
-    from datetime import datetime, timezone
+    from django.utils import timezone as dj_tz
 
     settings = StoreSettings.get_solo()
     store_lang = resolve_receipt_store_lang(settings, lang)
@@ -360,7 +475,9 @@ def build_nakladnoy_dict(
                 "total": _format_amount(line_total),
             }
         )
-    now = datetime.now(timezone.utc).astimezone().isoformat()
+    # Django TIME_ZONE (Asia/Tashkent) — OS UTC/offsetga bog'lanmasin.
+    now_local = dj_tz.localtime()
+    now_display = now_local.strftime("%Y-%m-%d %H:%M")
     return {
         "doc_type": "nakladnoy",
         "store": {
@@ -377,7 +494,7 @@ def build_nakladnoy_dict(
             "receipt_printer_type": settings.receipt_printer_type,
         },
         "public_no": public_no,
-        "created_at": now,
+        "created_at": now_display,
         "cashier": cashier_username,
         "note": (note or "").strip(),
         "lines": lines_out,
@@ -400,7 +517,7 @@ def nakladnoy_plain_text(dto: dict) -> str:
     buf.append(brand)
     buf.append(t(labels["title"]))
     buf.append(_line_80mm(labels["no"], str(dto.get("public_no") or ""), width=width))
-    created = str(dto.get("created_at") or "")[:19]
+    created = str(dto.get("created_at") or "").strip()
     buf.append(_line_80mm(labels["time"], created, width=width))
     buf.append(_line_80mm(labels["cashier"], t(str(dto.get("cashier") or "")), width=width))
     if dto.get("note"):
@@ -632,6 +749,20 @@ def _choose_receipt_codepage(*, lang: str, settings: StoreSettings) -> str:
     return (settings.encoding or "CP866").strip().upper()
 
 
+def resolve_receipt_render_mode(settings: StoreSettings | None = None) -> str:
+    """
+    text = ESC/POS codepage bytes; image = bitmap body (Cyrillic-safe on Chinese firmware).
+    Env RECEIPT_RENDER_MODE overrides store setting when set to text|image (ops/debug).
+    """
+    env = (os.environ.get("RECEIPT_RENDER_MODE") or "").strip().lower()
+    if env in {"text", "image"}:
+        return env
+    if settings is None:
+        settings = StoreSettings.get_solo()
+    mode = (getattr(settings, "receipt_render_mode", None) or "text").strip().lower()
+    return "image" if mode == "image" else "text"
+
+
 def _emit_text_manual_encoded(printer: object, text: str, codepage: str) -> bool:
     """
     Encode text manually and write raw bytes (fallback for firmware/codepage quirks).
@@ -697,7 +828,7 @@ def receipt_escpos_bytes(receipt: dict) -> bytes:
                 },
             }
         )
-        render_mode = (os.environ.get("RECEIPT_RENDER_MODE", "text") or "text").strip().lower()
+        render_mode = resolve_receipt_render_mode(settings)
         manual_encode = (os.environ.get("RECEIPT_MANUAL_ENCODE", "0") or "0").strip().lower() in {
             "1",
             "true",
@@ -705,7 +836,7 @@ def receipt_escpos_bytes(receipt: dict) -> bytes:
             "on",
         }
         if render_mode == "image":
-            # Optional mode: bitmap body to bypass codepage issues on some models.
+            # Bitmap body: bypasses ESC/POS codepage (Chinese firmware often ignores CP1251/CP866).
             receipt_width = receipt.get("store", {}).get("receipt_width", "58mm")
             font_size = _resolve_receipt_font_size(receipt_width=receipt_width, settings=settings)
             body_imgs = _receipt_text_images(

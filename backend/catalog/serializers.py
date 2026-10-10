@@ -94,6 +94,11 @@ class ProductVariantSerializer(serializers.ModelSerializer):
             "updated_at",
             "last_received_at",
         ]
+        extra_kwargs = {
+            "purchase_price": {"min_value": Decimal("0")},
+            "list_price": {"min_value": Decimal("0"), "allow_null": True},
+            "wholesale_price": {"min_value": Decimal("0"), "allow_null": True},
+        }
 
     def update(self, instance, validated_data):
         # Stock is ledger-driven and must not be mutated from catalog edits.
@@ -201,10 +206,12 @@ class PosProductVariantSerializer(serializers.ModelSerializer):
 class SimpleBulkCreateSerializer(serializers.Serializer):
     """Simplified create for catalog SKUs."""
     product_id = serializers.UUIDField()
-    purchase_price = serializers.DecimalField(max_digits=12, decimal_places=2)
-    list_price = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
+    purchase_price = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0"))
+    list_price = serializers.DecimalField(
+        max_digits=12, decimal_places=2, required=False, allow_null=True, min_value=Decimal("0")
+    )
     wholesale_price = serializers.DecimalField(
-        max_digits=12, decimal_places=2, required=False, allow_null=True
+        max_digits=12, decimal_places=2, required=False, allow_null=True, min_value=Decimal("0")
     )
     initial_qty = serializers.DecimalField(
         max_digits=12, decimal_places=3, required=False, default=Decimal("0"), min_value=Decimal("0")
@@ -217,10 +224,12 @@ class SimpleBulkCreateSerializer(serializers.Serializer):
 
 class BulkGridCellSerializer(serializers.Serializer):
     """One SKU row: prices, qty, unit, optional barcode."""
-    purchase_price = serializers.DecimalField(max_digits=12, decimal_places=2)
-    list_price = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
+    purchase_price = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0"))
+    list_price = serializers.DecimalField(
+        max_digits=12, decimal_places=2, required=False, allow_null=True, min_value=Decimal("0")
+    )
     wholesale_price = serializers.DecimalField(
-        max_digits=12, decimal_places=2, required=False, allow_null=True
+        max_digits=12, decimal_places=2, required=False, allow_null=True, min_value=Decimal("0")
     )
     initial_qty = serializers.DecimalField(
         max_digits=12, decimal_places=3, required=False, default=Decimal("0"), min_value=Decimal("0")
@@ -248,7 +257,7 @@ class BulkGridSerializer(serializers.Serializer):
 
 
 class PosPriceUpdateSerializer(serializers.Serializer):
-    list_price = serializers.DecimalField(max_digits=12, decimal_places=2)
+    list_price = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0"))
 
 
 class SupplierSerializer(serializers.ModelSerializer):

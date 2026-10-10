@@ -1,11 +1,21 @@
 import { useEffect, useMemo, useState, useCallback, useRef, type RefObject } from 'react'
-import type { StocktakeSession, Variant } from '../api'
-import { fetchVariants } from '../api'
+import {
+  fetchLabelEscpos,
+  fetchVariants,
+  type LabelStickerSize,
+  type StocktakeSession,
+  type StoreSettings,
+  type Variant,
+} from '../api'
 import { useTranslation } from 'react-i18next'
 import { ActionToast } from '../components/ActionToast'
 import { DecimalQtyField } from '../components/DecimalQtyField'
 import { formatQty, normalizeUnit, parseQty, type ProductUnit } from '../utils/qty'
 import { filterVariantsForPicker, stocktakeLineMatchesSearch } from '../utils/variantSearch'
+import { dispatchLabel } from '../utils/printingHub'
+import { isPrinterError, translatePrinterError } from '../utils/printerErrors'
+
+const LABEL_SIZE_OPTIONS: LabelStickerSize[] = ['30x20', '40x30', '40x50', '50x40', '58mm']
 
 type InventoryMode = 'receive' | 'adjust' | 'stocktake'
 
@@ -271,6 +281,7 @@ export function InventoryPage({
   onSetCount,
   onApplyStocktake,
   embedded = false,
+  settings = null,
 }: {
   variants: Variant[]
   stocktake: StocktakeSession | null
@@ -282,6 +293,7 @@ export function InventoryPage({
   onApplyStocktake: () => Promise<void>
   /** Hide outer title when shown inside Warehouse hub */
   embedded?: boolean
+  settings?: StoreSettings | null
 }) {
   const { t, i18n } = useTranslation()
   const langRu = i18n.language.startsWith('ru')
@@ -298,6 +310,12 @@ export function InventoryPage({
   const [countByVariant, setCountByVariant] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState<{ kind: 'ok' | 'err' | 'info'; message: string } | null>(null)
+  const [labelPrompt, setLabelPrompt] = useState<{
+    variant: Variant
+    copies: string
+    size: LabelStickerSize
+  } | null>(null)
+  const [labelBusy, setLabelBusy] = useState(false)
 
   const selectedVariant = useMemo(() => variants.find((v) => v.id === variantId) || null, [variants, variantId])
   const receiveQty = parseQty(qty || '0')
@@ -337,6 +355,62 @@ export function InventoryPage({
     setSearchResetToken((n) => n + 1)
   }
 
+  function defaultLabelSize(): LabelStickerSize {
+    const raw = settings?.default_label_size
+    return LABEL_SIZE_OPTIONS.includes(raw as LabelStickerSize)
+      ? (raw as LabelStickerSize)
+      : '40x30'
+  }
+
+  function suggestedLabelCopies(variant: Variant, receivedQty: number): number {
+    const unit = unitOf(variant)
+    if (unit === 'dona' || unit === 'qop') {
+      return Math.min(200, Math.max(1, Math.floor(receivedQty)))
+    }
+    return 1
+  }
+
+  function closeLabelPrompt() {
+    setLabelPrompt(null)
+    resetReceiveForm()
+  }
+
+  async function printReceiveLabels() {
+    if (!labelPrompt) return
+    const barcode = (labelPrompt.variant.barcode || '').trim()
+    if (!barcode) {
+      setToast({ kind: 'err', message: t('admin.catalog.noBarcode') })
+      return
+    }
+    const copies = Math.max(1, Math.min(200, Math.floor(Number(labelPrompt.copies) || 0)))
+    if (!Number.isFinite(copies) || copies < 1) {
+      setToast({ kind: 'err', message: t('admin.catalog.copiesInvalid') })
+      return
+    }
+    setLabelBusy(true)
+    try {
+      const out = await fetchLabelEscpos(labelPrompt.variant.id, labelPrompt.size, copies, true)
+      const b64 = (out.raw_base64 || out.escpos_base64 || '').trim()
+      if (!b64) throw new Error(t('err.LABEL_PRINT_FAILED'))
+      await dispatchLabel(b64, settings)
+      setToast({ kind: 'ok', message: t('admin.catalog.printLabelOk', { count: copies }) })
+      closeLabelPrompt()
+    } catch (e: unknown) {
+      const rawMessage = e instanceof Error ? e.message : String(e || '')
+      if (isPrinterError(rawMessage)) {
+        setToast({ kind: 'err', message: translatePrinterError(rawMessage) })
+      } else {
+        const code = (e as Error & { code?: string }).code
+        setToast({
+          kind: 'err',
+          message: code ? t(`err.${code}`, { defaultValue: rawMessage }) : rawMessage || t('err.LABEL_PRINT_FAILED'),
+        })
+      }
+    } finally {
+      setLabelBusy(false)
+    }
+  }
+
   async function runAction(fn: () => Promise<void>, okMessage: string, opts?: { resetForm?: boolean }) {
     setBusy(true)
     setToast(null)
@@ -344,6 +418,34 @@ export function InventoryPage({
       await fn()
       setToast({ kind: 'ok', message: okMessage })
       if (opts?.resetForm) resetReceiveForm()
+    } catch (e: unknown) {
+      const code = (e as Error & { code?: string }).code
+      setToast({ kind: 'err', message: t(`err.${code || 'API_ERROR'}`) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function submitReceive() {
+    const v = selectedVariant
+    const qtyToReceive = Math.max(0, receiveQty)
+    if (!v || qtyToReceive <= 0) return
+    setBusy(true)
+    setToast(null)
+    try {
+      await onReceive(v.id, qtyToReceive, note)
+      setToast({ kind: 'ok', message: t('admin.inventory.receiveSuccess') })
+      const canOfferLabel =
+        settings?.label_printing_enabled !== false && Boolean((v.barcode || '').trim())
+      if (canOfferLabel) {
+        setLabelPrompt({
+          variant: v,
+          copies: String(suggestedLabelCopies(v, qtyToReceive)),
+          size: defaultLabelSize(),
+        })
+      } else {
+        resetReceiveForm()
+      }
     } catch (e: unknown) {
       const code = (e as Error & { code?: string }).code
       setToast({ kind: 'err', message: t(`err.${code || 'API_ERROR'}`) })
@@ -460,13 +562,7 @@ export function InventoryPage({
                 type="button"
                 disabled={busy || !variantId || receiveQty <= 0}
                 className="touch-btn w-full min-h-14 text-lg py-3 rounded-xl bg-emerald-700 border border-emerald-500 disabled:opacity-40 font-semibold"
-                onClick={() =>
-                  void runAction(
-                    () => onReceive(variantId, Math.max(0, receiveQty), note),
-                    t('admin.inventory.receiveSuccess'),
-                    { resetForm: true },
-                  )
-                }
+                onClick={() => void submitReceive()}
               >
                 {t('admin.inventory.receiveAction')}
               </button>
@@ -719,6 +815,71 @@ export function InventoryPage({
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {labelPrompt && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-900 p-4 space-y-3">
+            <h3 className="text-lg font-semibold">{t('admin.inventory.printLabelsTitle')}</h3>
+            <p className="text-sm text-slate-300">
+              {pickProductName(labelPrompt.variant, langRu)}
+            </p>
+            <p className="text-xs text-slate-400">{t('admin.inventory.printLabelsHint')}</p>
+            <label className="space-y-1 block">
+              <span className="text-xs text-slate-400">{t('admin.catalog.labelSize')}</span>
+              <select
+                className="touch-btn w-full min-h-12 px-3 rounded-xl bg-slate-950 border border-slate-700"
+                value={labelPrompt.size}
+                onChange={(e) =>
+                  setLabelPrompt({
+                    ...labelPrompt,
+                    size: e.target.value as LabelStickerSize,
+                  })
+                }
+              >
+                {LABEL_SIZE_OPTIONS.map((size) => (
+                  <option key={size} value={size}>
+                    {t(`admin.settings.labelSize.${size}`)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1 block">
+              <span className="text-xs text-slate-400">{t('admin.catalog.copies')}</span>
+              <input
+                className="touch-btn w-full min-h-12 px-3 rounded-xl bg-slate-950 border border-slate-700"
+                type="number"
+                min={1}
+                max={200}
+                value={labelPrompt.copies}
+                onChange={(e) =>
+                  setLabelPrompt({
+                    ...labelPrompt,
+                    copies: e.target.value.replace(/\D/g, '').slice(0, 3),
+                  })
+                }
+              />
+            </label>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                className="touch-btn min-h-12 px-4 rounded-xl bg-slate-800 border border-slate-600"
+                disabled={labelBusy}
+                onClick={() => closeLabelPrompt()}
+              >
+                {t('admin.inventory.printLabelsSkip')}
+              </button>
+              <button
+                type="button"
+                className="touch-btn min-h-12 px-4 rounded-xl bg-emerald-700 border border-emerald-500 font-semibold disabled:opacity-50"
+                disabled={labelBusy}
+                onClick={() => void printReceiveLabels()}
+              >
+                {labelBusy ? t('admin.common.loading') : t('admin.catalog.printLabel')}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

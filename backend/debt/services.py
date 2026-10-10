@@ -27,7 +27,14 @@ def record_debt_payment(
     method_norm = (method or DebtPayment.Method.CASH).strip().upper()
     if method_norm not in {DebtPayment.Method.CASH, DebtPayment.Method.CARD}:
         raise ValueError("method must be CASH or CARD")
-    bank = (card_bank or "").strip().upper() if method_norm == DebtPayment.Method.CARD else ""
+    bank = ""
+    if method_norm == DebtPayment.Method.CARD:
+        from sales.models import CardBank
+
+        bank = (card_bank or "").strip().upper()
+        valid = {c.value for c in CardBank}
+        if bank not in valid:
+            raise ValueError("card_bank required for CARD (MBANK, BAKAI, ZERO, EKO_ISLAMIC)")
 
     payment = DebtPayment.objects.create(
         customer=customer,

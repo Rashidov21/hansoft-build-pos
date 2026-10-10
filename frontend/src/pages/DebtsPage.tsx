@@ -201,6 +201,13 @@ export function DebtsPage({
       setToast({ kind: 'err', message: t('admin.debts.amountPlaceholder', { defaultValue: 'Summa kiriting' }) })
       return
     }
+    if (repayMethod === 'CARD' && !String(repayCardBank || '').trim()) {
+      setToast({
+        kind: 'err',
+        message: t('pay.bankRequired', { defaultValue: 'Karta uchun bankni tanlang' }),
+      })
+      return
+    }
     setRepaySubmitting(true)
     try {
       await onRepay(repayModalTarget.customerId, amtDec.toFixed(0), {

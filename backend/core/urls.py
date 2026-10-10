@@ -5,7 +5,8 @@ from .views import BackupNowView, ConnectivityView
 
 
 def health(_request):
-    return JsonResponse({"status": "ok", "service": "geeks-pos-api"})
+    # Build POS: alohida service id — boshqa Hansoft (geeks-pos-api) bilan port chalkashmasin.
+    return JsonResponse({"status": "ok", "service": "hansoft-build-pos-api"})
 
 
 urlpatterns = [

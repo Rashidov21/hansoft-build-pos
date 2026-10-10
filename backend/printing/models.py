@@ -9,6 +9,17 @@ class StoreSettings(models.Model):
         ESC_POS = "ESC_POS", "ESC/POS"
         TSPL = "TSPL", "TSPL"
 
+    class LabelSize(models.TextChoices):
+        S_30X20 = "30x20", "30×20 mm"
+        S_40X30 = "40x30", "40×30 mm"
+        S_40X50 = "40x50", "40×50 mm"
+        S_50X40 = "50x40", "50×40 mm"
+        S_58MM = "58mm", "58×40 mm"
+
+    class ReceiptRenderMode(models.TextChoices):
+        TEXT = "text", "RAW text (ESC/POS codepage)"
+        IMAGE = "image", "Bitmap image (Cyrillic-safe)"
+
     """Singleton-style store metadata for receipt header."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -39,9 +50,39 @@ class StoreSettings(models.Model):
     )
     # Optional Windows port hint (e.g. USB002) for label printer.
     label_printer_port = models.CharField(max_length=64, blank=True, default="")
+    # Master switch for sticker UI (catalog reprint / settings test). API still renders when called.
+    label_printing_enabled = models.BooleanField(
+        default=True,
+        help_text="Enable label/sticker printing UI (disable if store has no label printer)",
+    )
+    # Default sticker stock size when client omits `size` (XP-365B common: 40×30).
+    default_label_size = models.CharField(
+        max_length=8,
+        choices=LabelSize.choices,
+        default=LabelSize.S_40X30,
+    )
+    # TSPL GAP between labels (mm). Compact 30×20 uses 1.5 when this stays at default 2.
+    label_gap_mm = models.DecimalField(
+        max_digits=4,
+        decimal_places=1,
+        default=Decimal("2.0"),
+        help_text="TSPL GAP height in mm between labels on the roll",
+    )
+    # TSPL DIRECTION: 0 or 1 (printer-dependent feed orientation).
+    label_direction = models.PositiveSmallIntegerField(
+        default=1,
+        help_text="TSPL DIRECTION command (0 or 1)",
+    )
     receipt_width = models.CharField(max_length=8, default="58mm")
     # 0 => auto defaults (80mm=26, 58mm=22). Positive value overrides bitmap receipt font size.
     receipt_font_size = models.PositiveSmallIntegerField(default=0)
+    # text = ESC/POS codepage bytes; image = Pillow bitmap (avoids Chinese firmware codepage bugs).
+    receipt_render_mode = models.CharField(
+        max_length=8,
+        choices=ReceiptRenderMode.choices,
+        default=ReceiptRenderMode.TEXT,
+        help_text="How receipt body is sent: RAW text or bitmap image",
+    )
     # Master switch: when False, POS never prints receipts and receipt printer UI is hidden.
     receipt_printing_enabled = models.BooleanField(
         default=False,

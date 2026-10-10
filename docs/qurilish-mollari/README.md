@@ -15,7 +15,7 @@ Implementatsiya: reja bosqichlari `build_pos_moslash`. Demo seed: `backend/clear
 | Foydalanuvchi | Kompyuter/POS dan bexabar — sodda UX |
 | Tarozi | Yo‘q |
 | Barcode | Bor, **majburiy emas**; etiketka mumkin |
-| Printer | XP-80C termochek (nakladnoy + chek) |
+| Printer | XP-80C chek/nakladnoy; XP-365B stiker (TSPL) |
 | Hisobot | Telegram + WhatsApp (Green API) |
 
 ## Hujjatlar
@@ -33,6 +33,8 @@ Implementatsiya: reja bosqichlari `build_pos_moslash`. Demo seed: `backend/clear
 | [08-yakuniy-qa.md](./08-yakuniy-qa.md) | Bosqich 7: S1–S8 + qaytim checklist |
 | [09-finger-test-topilmalar.md](./09-finger-test-topilmalar.md) | UI/UX finger-test topilmalari |
 | [10-pos-ui-yechimlar.md](./10-pos-ui-yechimlar.md) | POS savdo UI buzilishi — yechimlar (Y1–Y6) |
+| [11-jiddiy-xatolar-yechimlar.md](./11-jiddiy-xatolar-yechimlar.md) | Jiddiy/hisobot/mayda xatolar — kod tekshiruvi + yechimlar (kod siz) |
+| [12-printer-etiketka.md](./12-printer-etiketka.md) | Chek/stiker kontrakti, o‘lchamlar, Settings/Katalog oqimi (B1–B3) |
 
 ## Asosiy savdo oqimi
 

@@ -315,7 +315,8 @@ class ProductVariantDetail(generics.RetrieveUpdateDestroyAPIView):
 
 
 class PosVariantPriceView(APIView):
-    permission_classes = [IsAuthenticated, IsCashier]
+    """Katalog list_price — faqat admin/owner (kassir chek unit_price orqali chegirma qiladi)."""
+    permission_classes = [IsAuthenticated, IsAdminOrOwner]
 
     def post(self, request, pk):
         try:

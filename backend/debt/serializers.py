@@ -12,6 +12,12 @@ class CustomerSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Phone must contain digits only and include country code.")
         if len(raw) < 9 or len(raw) > 15:
             raise serializers.ValidationError("Phone length is invalid. Include country code, without '+'.")
+        qs = Customer.objects.filter(phone_normalized=raw)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            # Stable code for FE i18n (avoid raw unique / ErrorDetail dumps).
+            raise serializers.ValidationError("CUSTOMER_PHONE_EXISTS")
         return raw
 
     class Meta:

@@ -55,7 +55,7 @@ def test_sale_history_includes_return_status_and_can_void():
     assert len(row["lines"]) == 1
     assert row["lines"][0]["barcode"] == "BC-HIST-META"
     assert row["lines"][0]["product_name_uz"] == "P"
-    assert row["lines"][0]["qty"] == 2
+    assert Decimal(str(row["lines"][0]["qty"])) == Decimal("2")
 
     return_sale_lines(
         sale=sale,

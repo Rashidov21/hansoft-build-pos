@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { MoreVertical, PackagePlus, Pencil, Power, Trash2, Tags, RotateCcw, Plus } from 'lucide-react'
-import type { BulkGridCell, Category, Product, ProductCategory, StoreSettings, Variant } from '../api'
+import {
+  fetchLabelEscpos,
+  fetchLabelQueueEscpos,
+  type BulkGridCell,
+  type Category,
+  type LabelStickerSize,
+  type Product,
+  type ProductCategory,
+  type StoreSettings,
+  type Variant,
+} from '../api'
 import { formatMoney } from '../utils/money'
 import {
   formatQty,
@@ -13,6 +23,10 @@ import {
 } from '../utils/qty'
 import { ActionToast } from '../components/ActionToast'
 import { ConfirmModal } from '../components/ConfirmModal'
+import { dispatchLabel } from '../utils/printingHub'
+import { isPrinterError, translatePrinterError } from '../utils/printerErrors'
+
+const LABEL_SIZE_OPTIONS: LabelStickerSize[] = ['30x20', '40x30', '40x50', '50x40', '58mm']
 
 const INPUT_CLS =
   'min-h-12 w-full rounded-xl bg-slate-950 border border-slate-600 px-3 text-base text-slate-100 placeholder:text-slate-500'
@@ -21,7 +35,7 @@ const BTN_PRIMARY = `${BTN_CLS} bg-emerald-700 border-emerald-500 text-white dis
 const BTN_NEUTRAL = `${BTN_CLS} bg-slate-800 border-slate-600 text-slate-100`
 
 const GRID =
-  'grid w-full min-w-0 grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_5rem_minmax(7rem,9rem)_minmax(6.5rem,8rem)_minmax(6.5rem,8rem)_3.25rem] items-center'
+  'grid w-full min-w-0 grid-cols-[2.25rem_minmax(0,1.4fr)_minmax(0,1fr)_5rem_minmax(7rem,9rem)_minmax(6.5rem,8rem)_minmax(6.5rem,8rem)_3.25rem] items-center'
 
 type CreateForm = {
   productCategory: string
@@ -150,6 +164,19 @@ export function CatalogPage({
   const [quickMode, setQuickMode] = useState<'add' | 'sub'>('add')
   const [quickAmount, setQuickAmount] = useState('')
 
+  const labelPrintingEnabled = settings?.label_printing_enabled !== false
+  const [labelPrint, setLabelPrint] = useState<Variant | null>(null)
+  const [labelSize, setLabelSize] = useState<LabelStickerSize>('40x30')
+  const [labelCopies, setLabelCopies] = useState('1')
+  const [labelShowPrice, setLabelShowPrice] = useState(true)
+  const [labelBusy, setLabelBusy] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+  const [batchOpen, setBatchOpen] = useState(false)
+  const [batchSize, setBatchSize] = useState<LabelStickerSize>('40x30')
+  const [batchCopies, setBatchCopies] = useState('1')
+  const [batchShowPrice, setBatchShowPrice] = useState(true)
+  const [batchBusy, setBatchBusy] = useState(false)
+
   const [confirmDelete, setConfirmDelete] = useState<Variant | null>(null)
   const [categoriesOpen, setCategoriesOpen] = useState(false)
   const [editingCategory, setEditingCategory] = useState<ProductCategory | null>(null)
@@ -196,6 +223,121 @@ export function CatalogPage({
 
   const ok = (message: string) => setToast({ kind: 'ok', message })
   const err = (message: string) => setToast({ kind: 'err', message })
+
+  function openLabelPrint(v: Variant) {
+    const raw = settings?.default_label_size
+    const size = LABEL_SIZE_OPTIONS.includes(raw as LabelStickerSize)
+      ? (raw as LabelStickerSize)
+      : '40x30'
+    setLabelPrint(v)
+    setLabelSize(size)
+    setLabelCopies('1')
+    setLabelShowPrice(settings?.show_price_on_labels_default !== false)
+  }
+
+  async function submitLabelPrint() {
+    if (!labelPrint) return
+    const barcode = (labelPrint.barcode || '').trim()
+    if (!barcode) {
+      err(t('admin.catalog.noBarcode'))
+      return
+    }
+    const copies = Math.max(1, Math.min(200, Math.floor(Number(labelCopies) || 0)))
+    if (!Number.isFinite(copies) || copies < 1) {
+      err(t('admin.catalog.copiesInvalid'))
+      return
+    }
+    setLabelBusy(true)
+    try {
+      const out = await fetchLabelEscpos(labelPrint.id, labelSize, copies, labelShowPrice)
+      const b64 = (out.raw_base64 || out.escpos_base64 || '').trim()
+      if (!b64) throw new Error(t('err.LABEL_PRINT_FAILED'))
+      await dispatchLabel(b64, settings)
+      ok(t('admin.catalog.printLabelOk', { count: copies }))
+      setLabelPrint(null)
+    } catch (e: unknown) {
+      const rawMessage = e instanceof Error ? e.message : String(e || '')
+      if (isPrinterError(rawMessage)) {
+        err(translatePrinterError(rawMessage))
+      } else {
+        const code = (e as Error & { code?: string }).code
+        err(code ? t(`err.${code}`, { defaultValue: rawMessage }) : rawMessage || t('err.LABEL_PRINT_FAILED'))
+      }
+    } finally {
+      setLabelBusy(false)
+    }
+  }
+
+  function toggleSelected(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function openBatchPrint() {
+    const raw = settings?.default_label_size
+    const size = LABEL_SIZE_OPTIONS.includes(raw as LabelStickerSize)
+      ? (raw as LabelStickerSize)
+      : '40x30'
+    setBatchSize(size)
+    setBatchCopies('1')
+    setBatchShowPrice(settings?.show_price_on_labels_default !== false)
+    setBatchOpen(true)
+  }
+
+  async function submitBatchPrint() {
+    const selected = filteredVariants.filter((v) => selectedIds.has(v.id) && !v.deleted_at)
+    const withBarcode = selected.filter((v) => (v.barcode || '').trim())
+    if (withBarcode.length === 0) {
+      err(t('admin.catalog.batchNoBarcode'))
+      return
+    }
+    const copies = Math.max(1, Math.min(200, Math.floor(Number(batchCopies) || 0)))
+    if (!Number.isFinite(copies) || copies < 1) {
+      err(t('admin.catalog.copiesInvalid'))
+      return
+    }
+    setBatchBusy(true)
+    try {
+      const queue = await fetchLabelQueueEscpos(
+        withBarcode.map((v) => ({ variant_id: v.id, copies })),
+        batchSize,
+        batchShowPrice,
+      )
+      let printed = 0
+      for (const item of queue.items) {
+        const b64 = (item.raw_base64 || item.escpos_base64 || '').trim()
+        if (!b64) continue
+        await dispatchLabel(b64, settings)
+        printed += copies
+      }
+      const skipped = selected.length - withBarcode.length
+      ok(
+        skipped > 0
+          ? t('admin.catalog.queuePrintedWithSkip', {
+              count: printed,
+              skus: withBarcode.length,
+              skipped,
+            })
+          : t('admin.catalog.queuePrintedCount', { count: printed, skus: withBarcode.length }),
+      )
+      setBatchOpen(false)
+      setSelectedIds(new Set())
+    } catch (e: unknown) {
+      const rawMessage = e instanceof Error ? e.message : String(e || '')
+      if (isPrinterError(rawMessage)) {
+        err(translatePrinterError(rawMessage))
+      } else {
+        const code = (e as Error & { code?: string }).code
+        err(code ? t(`err.${code}`, { defaultValue: rawMessage }) : rawMessage || t('err.LABEL_QUEUE_FAILED'))
+      }
+    } finally {
+      setBatchBusy(false)
+    }
+  }
 
   function categoryLabel(c: ProductCategory): string {
     return langRu ? c.name_ru || c.name_uz : c.name_uz
@@ -652,8 +794,44 @@ export function CatalogPage({
         </section>
       )}
 
+      {labelPrintingEnabled && selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-800 bg-emerald-950/30 px-3 py-2">
+          <span className="text-sm text-emerald-100">
+            {t('admin.catalog.batchSelected', { count: selectedIds.size })}
+          </span>
+          <div className="flex gap-2">
+            <button type="button" className={BTN_NEUTRAL} onClick={() => setSelectedIds(new Set())}>
+              {t('admin.catalog.batchClear')}
+            </button>
+            <button type="button" className={BTN_PRIMARY} onClick={() => openBatchPrint()}>
+              {t('admin.catalog.batchPrint')}
+            </button>
+          </div>
+        </div>
+      )}
+
       <section className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden">
         <div className={`${GRID} bg-slate-900 text-xs pos-lg:text-sm text-slate-400 border-b border-slate-800`}>
+          <div className="p-2 pos-lg:p-3 text-center">
+            {labelPrintingEnabled ? (
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                aria-label={t('admin.catalog.batchSelectAll')}
+                checked={
+                  filteredVariants.length > 0 &&
+                  filteredVariants.every((v) => v.deleted_at || selectedIds.has(v.id))
+                }
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setSelectedIds(new Set(filteredVariants.filter((v) => !v.deleted_at).map((v) => v.id)))
+                  } else {
+                    setSelectedIds(new Set())
+                  }
+                }}
+              />
+            ) : null}
+          </div>
           <div className="p-2 pos-lg:p-3">{t('admin.catalog.product')}</div>
           <div className="p-2 pos-lg:p-3">{t('admin.catalog.productCategory')}</div>
           <div className="p-2 pos-lg:p-3">{t('admin.catalog.honey.unit')}</div>
@@ -676,6 +854,17 @@ export function CatalogPage({
               const isLow = v.is_active && stock < lowStockThreshold
               return (
                 <div key={v.id} className={`${GRID} ${rowClass(v)}`}>
+                  <div className="p-2 flex justify-center">
+                    {labelPrintingEnabled && !v.deleted_at ? (
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4"
+                        checked={selectedIds.has(v.id)}
+                        onChange={() => toggleSelected(v.id)}
+                        aria-label={t('admin.catalog.batchSelectRow')}
+                      />
+                    ) : null}
+                  </div>
                   <div className="p-2 pos-lg:p-3 min-w-0">
                     <div className="font-medium truncate" title={name}>
                       {name}
@@ -750,7 +939,7 @@ export function CatalogPage({
         <div
           className="fixed z-50 min-w-[12rem] rounded-xl border border-slate-600 bg-slate-900 shadow-xl p-1"
           style={{
-            top: Math.min(actionMenu.y + 4, window.innerHeight - 220),
+            top: Math.min(actionMenu.y + 4, window.innerHeight - 300),
             left: Math.max(8, Math.min(actionMenu.x - 192, window.innerWidth - 208)),
           }}
           onClick={(e) => e.stopPropagation()}
@@ -796,6 +985,20 @@ export function CatalogPage({
                 <PackagePlus className="h-4 w-4" aria-hidden />
                 {t('admin.catalog.quickAdjust')}
               </button>
+              {labelPrintingEnabled && (
+                <button
+                  type="button"
+                  className="touch-btn w-full min-h-12 px-3 rounded-lg text-left text-sm hover:bg-slate-800 inline-flex items-center gap-2"
+                  onClick={() => {
+                    const v = actionMenu.variant
+                    setActionMenu(null)
+                    openLabelPrint(v)
+                  }}
+                >
+                  <Tags className="h-4 w-4" aria-hidden />
+                  {t('admin.catalog.printLabel')}
+                </button>
+              )}
               <button
                 type="button"
                 className="touch-btn w-full min-h-12 px-3 rounded-lg text-left text-sm hover:bg-slate-800 inline-flex items-center gap-2"
@@ -903,6 +1106,137 @@ export function CatalogPage({
               </button>
               <button type="button" className={BTN_PRIMARY} disabled={busy} onClick={() => void saveEdit()}>
                 {t('admin.common.save')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {batchOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-900 p-4 space-y-3">
+            <h3 className="text-lg font-semibold">{t('admin.catalog.batchPrintTitle')}</h3>
+            <p className="text-sm text-slate-300">
+              {t('admin.catalog.batchPrintHint', { count: selectedIds.size })}
+            </p>
+            <label className="space-y-1 block">
+              <span className="text-xs text-slate-400">{t('admin.catalog.labelSize')}</span>
+              <select
+                className={INPUT_CLS}
+                value={batchSize}
+                onChange={(e) => setBatchSize(e.target.value as LabelStickerSize)}
+              >
+                {LABEL_SIZE_OPTIONS.map((size) => (
+                  <option key={size} value={size}>
+                    {t(`admin.settings.labelSize.${size}`)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1 block">
+              <span className="text-xs text-slate-400">{t('admin.catalog.copies')}</span>
+              <input
+                className={INPUT_CLS}
+                type="number"
+                min={1}
+                max={200}
+                value={batchCopies}
+                onChange={(e) => setBatchCopies(e.target.value.replace(/\D/g, '').slice(0, 3))}
+              />
+              <span className="text-xs text-slate-500">{t('admin.catalog.batchCopiesHelp')}</span>
+            </label>
+            <label className="flex items-center gap-3 min-h-12 text-sm">
+              <input
+                type="checkbox"
+                className="h-5 w-5"
+                checked={batchShowPrice}
+                onChange={(e) => setBatchShowPrice(e.target.checked)}
+              />
+              <span>{t('admin.settings.showPriceOnLabels')}</span>
+            </label>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                className={BTN_NEUTRAL}
+                disabled={batchBusy}
+                onClick={() => setBatchOpen(false)}
+              >
+                {t('admin.common.cancel')}
+              </button>
+              <button
+                type="button"
+                className={BTN_PRIMARY}
+                disabled={batchBusy}
+                onClick={() => void submitBatchPrint()}
+              >
+                {batchBusy ? t('admin.common.loading') : t('admin.catalog.batchPrint')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {labelPrint && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-900 p-4 space-y-3">
+            <h3 className="text-lg font-semibold">{t('admin.catalog.printLabelTitle')}</h3>
+            <p className="text-sm text-slate-300">
+              {(langRu ? labelPrint.product_name_ru : labelPrint.product_name_uz) || labelPrint.product_name_uz}
+            </p>
+            <p className="text-xs text-slate-400 tabular-nums">
+              {t('admin.catalog.barcode')}: {(labelPrint.barcode || '').trim() || t('admin.catalog.noBarcodeShort')}
+            </p>
+            <label className="space-y-1 block">
+              <span className="text-xs text-slate-400">{t('admin.catalog.labelSize')}</span>
+              <select
+                className={INPUT_CLS}
+                value={labelSize}
+                onChange={(e) => setLabelSize(e.target.value as LabelStickerSize)}
+              >
+                {LABEL_SIZE_OPTIONS.map((size) => (
+                  <option key={size} value={size}>
+                    {t(`admin.settings.labelSize.${size}`)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1 block">
+              <span className="text-xs text-slate-400">{t('admin.catalog.copies')}</span>
+              <input
+                className={INPUT_CLS}
+                type="number"
+                min={1}
+                max={200}
+                step={1}
+                value={labelCopies}
+                onChange={(e) => setLabelCopies(e.target.value.replace(/\D/g, '').slice(0, 3))}
+              />
+            </label>
+            <label className="flex items-center gap-3 min-h-12 text-sm">
+              <input
+                type="checkbox"
+                className="h-5 w-5"
+                checked={labelShowPrice}
+                onChange={(e) => setLabelShowPrice(e.target.checked)}
+              />
+              <span>{t('admin.settings.showPriceOnLabels')}</span>
+            </label>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                className={BTN_NEUTRAL}
+                disabled={labelBusy}
+                onClick={() => setLabelPrint(null)}
+              >
+                {t('admin.common.cancel')}
+              </button>
+              <button
+                type="button"
+                className={BTN_PRIMARY}
+                disabled={labelBusy || !(labelPrint.barcode || '').trim()}
+                onClick={() => void submitLabelPrint()}
+              >
+                {labelBusy ? t('admin.common.loading') : t('admin.catalog.printLabel')}
               </button>
             </div>
           </div>

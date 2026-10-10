@@ -8,15 +8,18 @@ from collections import defaultdict
 from django.db.models import Q
 from django.utils import timezone
 from datetime import datetime, time, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 import csv
 from io import BytesIO
 
 from core.exceptions import (
+    BelowCostError,
     DebtPolicyError,
     DomainError,
     InsufficientStock,
     InvalidPaymentSplit,
+    NoOpenShiftError,
+    PriceFloorError,
 )
 from core.permissions import IsCashier
 from core.permissions import IsAdminOrOwner
@@ -37,7 +40,7 @@ from .archive_services import archive_sale, reverse_return_movement
 from .refund_utils import refund_capacity_by_method, refunds_already_list
 from .history_meta import build_history_lines_meta, build_history_return_meta
 from .return_state import build_return_eligible_lines, remaining_return_units_by_sale_ids
-from .services import complete_sale, return_sale_lines, void_sale
+from .services import complete_sale, edit_sale_line_price, return_sale_lines, void_sale
 
 
 def _request_lang(request) -> str:
@@ -144,12 +147,15 @@ class CompleteSaleView(APIView):
                 debt_due_date=data.get("debt_due_date"),
                 debt_installment_months=data.get("debt_installment_months"),
                 note=data.get("note") or "",
+                confirm_below_cost=bool(data.get("confirm_below_cost")),
             )
         except InsufficientStock as e:
             return Response({"code": e.code, "detail": str(e)}, status=e.status_code)
         except InvalidPaymentSplit as e:
             return Response({"code": e.code, "detail": str(e)}, status=e.status_code)
         except DebtPolicyError as e:
+            return Response({"code": e.code, "detail": str(e)}, status=e.status_code)
+        except (BelowCostError, PriceFloorError, NoOpenShiftError) as e:
             return Response({"code": e.code, "detail": str(e)}, status=e.status_code)
         except DomainError as e:
             return Response({"code": e.code, "detail": str(e)}, status=e.status_code)
@@ -666,7 +672,7 @@ class SaleLinePriceEditView(APIView):
         """
         Edit the selling price of a sale line after sale completion.
         Only admin/owner can do this.
-        
+
         Request body:
         {
             "list_unit_price": "150000.00"
@@ -676,74 +682,32 @@ class SaleLinePriceEditView(APIView):
             sale = Sale.objects.get(pk=sale_id)
         except Sale.DoesNotExist:
             return Response({"code": "SALE_NOT_FOUND", "detail": "Sale not found."}, status=404)
-        
+
         try:
             line = SaleLine.objects.select_related("variant__product").get(pk=line_id, sale=sale)
         except SaleLine.DoesNotExist:
             return Response({"code": "LINE_NOT_FOUND", "detail": "Sale line not found."}, status=404)
-        
-        # Validate request
+
         new_price_str = request.data.get("list_unit_price")
         if new_price_str is None:
             return Response({"code": "PRICE_REQUIRED", "detail": "list_unit_price is required."}, status=400)
-        
+
         try:
-            new_price = _q(Decimal(str(new_price_str)))
-        except Exception:
+            new_price = Decimal(str(new_price_str))
+        except (InvalidOperation, ValueError, TypeError):
             return Response({"code": "INVALID_PRICE", "detail": "Invalid price format."}, status=400)
-        
-        if new_price < 0:
-            return Response({"code": "NEGATIVE_PRICE", "detail": "Price cannot be negative."}, status=400)
-        
-        # Calculate new line totals
-        old_price = line.list_unit_price
-        price_diff = new_price - old_price
-        line_discount_per_unit = line.line_discount / Decimal(line.qty)
-        new_net_unit = _q(new_price - line_discount_per_unit)
-        
-        if new_net_unit < 0:
-            return Response({"code": "NEGATIVE_NET_PRICE", "detail": "Net price cannot be negative after discount."}, status=400)
-        
-        new_line_total = _q(new_net_unit * Decimal(line.qty))
-        new_subtotal = _q(sale.subtotal + (price_diff * Decimal(line.qty)))
-        new_grand_total = _q(new_subtotal - sale.discount_total)
-        
-        # Update line
-        line.list_unit_price = new_price
-        line.net_unit_price = new_net_unit
-        line.line_total = new_line_total
-        line.save(update_fields=["list_unit_price", "net_unit_price", "line_total", "updated_at"])
-        
-        # Update sale totals
-        sale.subtotal = new_subtotal
-        sale.grand_total = new_grand_total
-        sale.save(update_fields=["subtotal", "grand_total", "updated_at"])
-        
-        # Log audit
-        log_audit(
-            event_type="sale_line_price_edited",
-            actor=request.user.username if request.user else None,
-            entity_id=str(sale.id),
-            payload={
-                "line_id": str(line.id),
-                "old_price": str(old_price),
-                "new_price": str(new_price),
-                "product_name": line.variant.product.name_uz,
-                "barcode": line.variant.barcode,
-                "qty": line.qty,
-                "old_line_total": str(line.line_total - new_line_total + line.line_total),
-                "new_line_total": str(new_line_total),
-                "old_sale_grand_total": str(sale.grand_total - new_grand_total + sale.grand_total),
-                "new_sale_grand_total": str(new_grand_total),
-            },
-        )
-        
-        return Response({
-            "line_id": str(line.id),
-            "sale_id": str(sale.id),
-            "old_price": str(old_price),
-            "new_price": str(new_price),
-            "line_total": str(new_line_total),
-            "sale_grand_total": str(new_grand_total),
-            "message": "Sale line price updated successfully."
-        })
+
+        try:
+            out = edit_sale_line_price(
+                sale=sale, line=line, new_price=new_price, user=request.user
+            )
+        except ValueError as exc:
+            msg = str(exc)
+            code = "PRICE_EDIT_DENIED"
+            if "negative" in msg.lower():
+                code = "NEGATIVE_PRICE"
+            elif "refund" in msg.lower() or "return" in msg.lower():
+                code = "PRICE_EDIT_AFTER_REFUND"
+            return Response({"code": code, "detail": msg}, status=400)
+
+        return Response({**out, "message": "Sale line price updated successfully."})

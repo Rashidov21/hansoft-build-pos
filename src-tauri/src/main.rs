@@ -161,7 +161,10 @@ fn health_ok_at(host: &str, port: u16) -> bool {
                 buf.starts_with("HTTP/1.1 200") || buf.starts_with("HTTP/1.0 200");
             let has_ok_payload =
                 buf.contains("\"status\":\"ok\"") || buf.contains("\"status\": \"ok\"");
-            return has_ok_status_line && has_ok_payload;
+            // Must be this product — other Hansoft builds also return status=ok on :8000.
+            let has_service = buf.contains("\"service\":\"hansoft-build-pos-api\"")
+                || buf.contains("\"service\": \"hansoft-build-pos-api\"");
+            return has_ok_status_line && has_ok_payload && has_service;
         }
     }
     false

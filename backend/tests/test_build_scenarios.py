@@ -99,6 +99,7 @@ def test_s2_wholesale_unit_price_on_complete():
                 "qty": 1,
                 "line_discount": "0",
                 "unit_price": "47000",
+                "price_tier": "wholesale",
             }
         ],
         payments=[{"method": "CASH", "amount": "47000"}],

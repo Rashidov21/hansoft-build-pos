@@ -7,6 +7,8 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from django.db.models import Sum
 
+from core.qty import parse_qty
+
 from .models import Sale, SaleLine, SaleRefund
 from .refund_utils import _grand_total_scale
 from .return_state import remaining_return_units_by_sale_ids
@@ -23,19 +25,28 @@ def build_history_return_meta(sales: list[Sale]) -> dict[str, dict]:
         return {}
     sale_ids = [s.id for s in sales]
     remaining_by_sale = remaining_return_units_by_sale_ids(sale_ids)
-    sold_units: dict[str, int] = {}
-    for row in SaleLine.objects.filter(sale_id__in=sale_ids).values("sale_id").annotate(t=Sum("qty")):
-        sold_units[str(row["sale_id"])] = int(row["t"] or 0)
+    # Bonus qatorlar vozvrat hisobidan chiqariladi — sold ham shu qoida bilan.
+    sold_units: dict[str, Decimal] = {}
+    for row in (
+        SaleLine.objects.filter(sale_id__in=sale_ids, is_bonus=False)
+        .values("sale_id")
+        .annotate(t=Sum("qty"))
+    ):
+        sold_units[str(row["sale_id"])] = parse_qty(row["t"] or 0)
 
     refund_by_sale: dict[str, Decimal] = {}
-    for row in SaleRefund.objects.filter(sale_id__in=sale_ids).values("sale_id").annotate(t=Sum("amount")):
+    for row in (
+        SaleRefund.objects.filter(sale_id__in=sale_ids, reversed_at__isnull=True)
+        .values("sale_id")
+        .annotate(t=Sum("amount"))
+    ):
         refund_by_sale[str(row["sale_id"])] = Decimal(str(row["t"] or 0))
 
     out: dict[str, dict] = {}
     for sale in sales:
         sid = str(sale.id)
-        sold = sold_units.get(sid, 0)
-        rem = remaining_by_sale.get(sid, 0)
+        sold = sold_units.get(sid, Decimal("0"))
+        rem = Decimal(str(remaining_by_sale.get(sid, Decimal("0"))))
         refund_total = refund_by_sale.get(sid, Decimal("0"))
 
         if sold <= 0:

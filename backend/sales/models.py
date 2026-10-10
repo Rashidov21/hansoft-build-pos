@@ -21,6 +21,14 @@ class Sale(models.Model):
         on_delete=models.PROTECT,
         related_name="sales",
     )
+    shift = models.ForeignKey(
+        "expenses.Shift",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="sales",
+        help_text="Open shift at sale time (null for legacy rows).",
+    )
     completed_at = models.DateTimeField(auto_now_add=True)
     subtotal = models.DecimalField(max_digits=12, decimal_places=2)
     discount_total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
@@ -42,6 +50,7 @@ class Sale(models.Model):
         indexes = [
             models.Index(fields=["completed_at"]),
             models.Index(fields=["status", "-completed_at"]),
+            models.Index(fields=["shift", "-completed_at"]),
         ]
 
 
@@ -118,6 +127,14 @@ class SaleRefund(models.Model):
         related_name="sale_refunds",
     )
     reason = models.CharField(max_length=500, blank=True, default="")
+    reversed_at = models.DateTimeField(null=True, blank=True)
+    reversed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="reversed_sale_refunds",
+    )
 
     class Meta:
         ordering = ["-created_at", "-id"]

@@ -10,10 +10,12 @@ import {
   fetchReportRoutes,
   sendLowStockReport,
   setUserPin,
+  testLabelPrintPayload,
   testReceiptPrintPayload,
   updateReportChannel,
   updateReportRoute,
   type IntegrationSettings,
+  type LabelStickerSize,
   type LicenseStatus,
   type PinUser,
   type ReportChannel,
@@ -23,11 +25,15 @@ import {
 } from '../api'
 import { useTranslation } from 'react-i18next'
 import { BUILD_INFO } from '../generated/build-info'
-import { receiptPrinterStatus } from '../utils/hardwareStatus'
+import { labelPrinterStatus, receiptPrinterStatus } from '../utils/hardwareStatus'
 import { printRawBase64 } from '../utils/tauriPrint'
+import { dispatchLabel } from '../utils/printingHub'
+import { isPrinterError, translatePrinterError } from '../utils/printerErrors'
 import { ActionToast } from '../components/ActionToast'
 import { getTauriMachineId } from '../utils/tauriMachineId'
 import { UsersPage } from './UsersPage'
+
+const LABEL_SIZE_OPTIONS: LabelStickerSize[] = ['30x20', '40x30', '40x50', '50x40', '58mm']
 
 export function SettingsPage({
   settings,
@@ -57,9 +63,14 @@ export function SettingsPage({
     label_printer_name: string
     label_printer_type: 'ESC_POS' | 'TSPL'
     label_printer_port?: string
+    label_printing_enabled?: boolean
+    default_label_size?: LabelStickerSize
+    label_gap_mm?: number | string
+    label_direction?: number
     receipt_lang?: string
     receipt_width: '58mm' | '80mm'
     receipt_font_size?: number
+    receipt_render_mode?: 'text' | 'image'
     receipt_printing_enabled?: boolean
     auto_print_on_sale: boolean
     scanner_mode: 'keyboard' | 'serial'
@@ -107,8 +118,13 @@ export function SettingsPage({
     label_printer_name: settings?.label_printer_name ?? '',
     label_printer_type: settings?.label_printer_type ?? 'TSPL',
     label_printer_port: settings?.label_printer_port ?? '',
+    label_printing_enabled: settings?.label_printing_enabled ?? true,
+    default_label_size: settings?.default_label_size ?? '40x30',
+    label_gap_mm: settings?.label_gap_mm ?? 2,
+    label_direction: settings?.label_direction ?? 1,
     receipt_width: settings?.receipt_width ?? '58mm',
     receipt_font_size: settings?.receipt_font_size ?? 0,
+    receipt_render_mode: (settings?.receipt_render_mode === 'image' ? 'image' : 'text') as 'text' | 'image',
     receipt_printing_enabled: settings?.receipt_printing_enabled ?? false,
     auto_print_on_sale: settings?.auto_print_on_sale ?? true,
     scanner_mode: settings?.scanner_mode ?? 'keyboard',
@@ -168,8 +184,13 @@ export function SettingsPage({
       label_printer_name: settings?.label_printer_name ?? '',
       label_printer_type: settings?.label_printer_type ?? 'TSPL',
       label_printer_port: settings?.label_printer_port ?? '',
+      label_printing_enabled: settings?.label_printing_enabled ?? true,
+      default_label_size: settings?.default_label_size ?? '40x30',
+      label_gap_mm: settings?.label_gap_mm ?? 2,
+      label_direction: settings?.label_direction ?? 1,
       receipt_width: settings?.receipt_width ?? '58mm',
       receipt_font_size: settings?.receipt_font_size ?? 0,
+      receipt_render_mode: (settings?.receipt_render_mode === 'image' ? 'image' : 'text') as 'text' | 'image',
       receipt_printing_enabled: settings?.receipt_printing_enabled ?? false,
       auto_print_on_sale: settings?.auto_print_on_sale ?? true,
       scanner_mode: settings?.scanner_mode ?? 'keyboard',
@@ -255,11 +276,17 @@ export function SettingsPage({
     () => receiptPrinterStatus(printerOptions, form.receipt_printer_name),
     [printerOptions, form.receipt_printer_name],
   )
+  const labelHw = useMemo(
+    () => labelPrinterStatus(printerOptions, form.label_printer_name),
+    [printerOptions, form.label_printer_name],
+  )
 
   const hardwareAlert =
-    form.receipt_printing_enabled && receiptHw === 'missing'
+    (form.receipt_printing_enabled && receiptHw === 'missing') ||
+    (form.label_printing_enabled && labelHw === 'missing')
       ? 'err'
-      : form.receipt_printing_enabled && receiptHw === 'no_device_list'
+      : (form.receipt_printing_enabled && receiptHw === 'no_device_list') ||
+          (form.label_printing_enabled && labelHw === 'no_device_list')
         ? 'warn'
         : 'ok'
 
@@ -502,6 +529,16 @@ export function SettingsPage({
                 ) : (
                   <li>{t('admin.settings.statusReceiptDisabled')}</li>
                 )}
+                {form.label_printing_enabled ? (
+                  <li>
+                    {labelHw === 'ok' && t('admin.settings.statusLabelOk')}
+                    {labelHw === 'default_printer' && t('admin.settings.statusLabelDefault')}
+                    {labelHw === 'missing' && t('admin.settings.statusLabelMissing')}
+                    {labelHw === 'no_device_list' && t('admin.settings.statusLabelNoList')}
+                  </li>
+                ) : (
+                  <li>{t('admin.settings.statusLabelDisabled')}</li>
+                )}
               </ul>
             </div>
 
@@ -518,13 +555,28 @@ export function SettingsPage({
                       receipt_printing_enabled: on,
                       auto_print_on_sale: on ? form.auto_print_on_sale : false,
                     })
-                    if (!on && hwStep === 1) setHwStep(3)
                   }}
                 />
                 <span>
                   <span className="font-medium">{t('admin.settings.receiptPrintingEnabled')}</span>
                   <span className="block text-xs text-slate-400 font-normal">
                     {t('admin.settings.receiptPrintingEnabledHelp')}
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-center gap-3 min-h-12 text-base">
+                <input
+                  type="checkbox"
+                  className="h-5 w-5"
+                  checked={form.label_printing_enabled}
+                  onChange={(e) => {
+                    setForm({ ...form, label_printing_enabled: e.target.checked })
+                  }}
+                />
+                <span>
+                  <span className="font-medium">{t('admin.settings.labelPrintingEnabled')}</span>
+                  <span className="block text-xs text-slate-400 font-normal">
+                    {t('admin.settings.labelPrintingEnabledHelp')}
                   </span>
                 </span>
               </label>
@@ -559,7 +611,7 @@ export function SettingsPage({
                     <button
                       type="button"
                       className="touch-btn min-h-12 px-6 rounded-xl bg-emerald-700 border border-emerald-500 font-medium"
-                      onClick={() => setHwStep(3)}
+                      onClick={() => setHwStep(2)}
                     >
                       {t('admin.settings.hwWizard.next')}
                     </button>
@@ -609,8 +661,8 @@ export function SettingsPage({
                         setActionToast({ kind: 'ok', message: t('admin.settings.testReceiptOk') })
                       } catch (e: unknown) {
                         const rawMessage = e instanceof Error ? e.message : String(e || '')
-                        if (rawMessage.startsWith('Printer ulanmagan:')) {
-                          setActionToast({ kind: 'err', message: rawMessage })
+                        if (isPrinterError(rawMessage)) {
+                          setActionToast({ kind: 'err', message: translatePrinterError(rawMessage) })
                           return
                         }
                         const code = (e as Error & { code?: string }).code
@@ -665,17 +717,219 @@ export function SettingsPage({
                       </p>
                     )}
                   </div>
-                  
+                  <div className="space-y-1">
+                    <label className="block text-xs text-slate-400">
+                      {t('admin.settings.receiptRenderMode')}
+                    </label>
+                    <select
+                      className={inputSoftCls}
+                      value={form.receipt_render_mode === 'image' ? 'image' : 'text'}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          receipt_render_mode: e.target.value === 'image' ? 'image' : 'text',
+                        })
+                      }
+                    >
+                      <option value="text">{t('admin.settings.receiptRenderModeText')}</option>
+                      <option value="image">{t('admin.settings.receiptRenderModeImage')}</option>
+                    </select>
+                    <p className="text-xs text-slate-500 leading-snug">
+                      {form.receipt_render_mode === 'image'
+                        ? t('admin.settings.receiptRenderModeImageHelp')
+                        : t('admin.settings.receiptRenderModeTextHelp')}
+                    </p>
+                  </div>
+
                   <div className="flex justify-between pt-2">
+                    <label className="flex items-center gap-3 min-h-12 text-base">
+                      <input
+                        type="checkbox"
+                        className="h-5 w-5"
+                        checked={form.auto_print_on_sale}
+                        onChange={(e) => setForm({ ...form, auto_print_on_sale: e.target.checked })}
+                      />
+                      {t('admin.settings.autoPrintOnSale')}
+                    </label>
+                    <button
+                      type="button"
+                      className="touch-btn min-h-12 px-6 rounded-xl bg-emerald-700 border border-emerald-500 font-medium"
+                      onClick={() => setHwStep(2)}
+                    >
+                      {t('admin.settings.hwWizard.next')}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {hwStep === 2 && !form.label_printing_enabled && (
+                <div className="space-y-3">
+                  <p className="text-sm text-slate-300">{t('admin.settings.labelStepSkipped')}</p>
+                  <div className="flex justify-between pt-2">
+                    <button
+                      type="button"
+                      className="touch-btn min-h-12 px-6 rounded-xl bg-slate-800 border border-slate-600"
+                      onClick={() => setHwStep(1)}
+                    >
+                      {t('admin.settings.hwWizard.back')}
+                    </button>
+                    <button
+                      type="button"
+                      className="touch-btn min-h-12 px-6 rounded-xl bg-emerald-700 border border-emerald-500 font-medium"
+                      onClick={() => setHwStep(3)}
+                    >
+                      {t('admin.settings.hwWizard.next')}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {hwStep === 2 && form.label_printing_enabled && (
+                <div className="space-y-3">
+                  <div className="text-slate-300">{t('admin.settings.hwWizard.step2')}</div>
+                  <label className="block text-xs text-slate-400">{t('admin.settings.labelPrinterName')}</label>
+                  <input
+                    list="printer-options"
+                    className={inputSoftCls}
+                    value={form.label_printer_name}
+                    onChange={(e) => setForm({ ...form, label_printer_name: e.target.value })}
+                    placeholder={t('admin.settings.labelPrinterNameExample')}
+                  />
+                  <label className="block text-xs text-slate-400">
+                    {t('admin.settings.labelPrinterPortLabel', { defaultValue: 'Label port (e.g. USB002)' })}
+                  </label>
+                  <input
+                    className={inputSoftCls}
+                    value={form.label_printer_port || ''}
+                    onChange={(e) => setForm({ ...form, label_printer_port: e.target.value })}
+                    placeholder="USB002"
+                  />
+                  <p className="text-xs text-slate-500">{t('admin.settings.printerNameHelp')}</p>
+                  <label className="block text-xs text-slate-400">{t('admin.settings.labelPrinterType')}</label>
+                  <select
+                    className={inputSoftCls}
+                    value={form.label_printer_type}
+                    onChange={(e) =>
+                      setForm({ ...form, label_printer_type: e.target.value as 'ESC_POS' | 'TSPL' })
+                    }
+                  >
+                    <option value="TSPL">TSPL</option>
+                    <option value="ESC_POS">ESC/POS</option>
+                  </select>
+                  <div className="space-y-1">
+                    <label className="block text-xs text-slate-400">{t('admin.settings.defaultLabelSize')}</label>
+                    <select
+                      className={inputSoftCls}
+                      value={form.default_label_size || '40x30'}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          default_label_size: e.target.value as LabelStickerSize,
+                        })
+                      }
+                    >
+                      {LABEL_SIZE_OPTIONS.map((size) => (
+                        <option key={size} value={size}>
+                          {t(`admin.settings.labelSize.${size}`)}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-slate-500 leading-snug">{t('admin.settings.defaultLabelSizeHelp')}</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="space-y-1 block">
+                      <span className="block text-xs text-slate-400">{t('admin.settings.labelGapMm')}</span>
+                      <input
+                        type="number"
+                        min={0.5}
+                        max={20}
+                        step={0.5}
+                        className={inputSoftCls}
+                        value={String(form.label_gap_mm ?? 2)}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            label_gap_mm: Math.max(0.5, Math.min(20, Number(e.target.value || 2))),
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="space-y-1 block">
+                      <span className="block text-xs text-slate-400">{t('admin.settings.labelDirection')}</span>
+                      <select
+                        className={inputSoftCls}
+                        value={String(form.label_direction ?? 1)}
+                        onChange={(e) =>
+                          setForm({ ...form, label_direction: Number(e.target.value) === 0 ? 0 : 1 })
+                        }
+                      >
+                        <option value="1">1</option>
+                        <option value="0">0</option>
+                      </select>
+                    </label>
+                  </div>
+                  <p className="text-xs text-slate-500 leading-snug">{t('admin.settings.labelGapDirectionHelp')}</p>
                   <label className="flex items-center gap-3 min-h-12 text-base">
                     <input
                       type="checkbox"
                       className="h-5 w-5"
-                      checked={form.auto_print_on_sale}
-                      onChange={(e) => setForm({ ...form, auto_print_on_sale: e.target.checked })}
+                      checked={form.show_price_on_labels_default}
+                      onChange={(e) =>
+                        setForm({ ...form, show_price_on_labels_default: e.target.checked })
+                      }
                     />
-                    {t('admin.settings.autoPrintOnSale')}
+                    <span>
+                      <span className="font-medium">{t('admin.settings.showPriceOnLabels')}</span>
+                      <span className="block text-xs text-slate-400 font-normal">
+                        {t('admin.settings.showPriceOnLabelsHelp')}
+                      </span>
+                    </span>
                   </label>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className="touch-btn min-h-12 px-5 rounded-xl bg-slate-800 border border-slate-600 disabled:opacity-50"
+                    onClick={async () => {
+                      setBusy(true)
+                      try {
+                        // Persist size/type before test so backend uses current store defaults.
+                        await onSave({ ...form, logo: null })
+                        const out = await testLabelPrintPayload()
+                        const b64 = (out.raw_base64 || out.escpos_base64 || '').trim()
+                        if (!b64) throw new Error(t('err.TEST_LABEL_FAILED'))
+                        await dispatchLabel(b64, {
+                          label_printer_name: form.label_printer_name,
+                          label_printer_port: form.label_printer_port,
+                        })
+                        setActionToast({ kind: 'ok', message: t('admin.settings.testLabelOk') })
+                      } catch (e: unknown) {
+                        const rawMessage = e instanceof Error ? e.message : String(e || '')
+                        if (isPrinterError(rawMessage)) {
+                          setActionToast({ kind: 'err', message: translatePrinterError(rawMessage) })
+                          return
+                        }
+                        const code = (e as Error & { code?: string }).code
+                        setActionToast({
+                          kind: 'err',
+                          message: code
+                            ? t(`err.${code}`, { defaultValue: rawMessage || t('err.TEST_LABEL_FAILED') })
+                            : rawMessage || t('err.TEST_LABEL_FAILED'),
+                        })
+                      } finally {
+                        setBusy(false)
+                      }
+                    }}
+                  >
+                    {t('admin.settings.testLabel')}
+                  </button>
+                  <div className="flex justify-between pt-2">
+                    <button
+                      type="button"
+                      className="touch-btn min-h-12 px-6 rounded-xl bg-slate-800 border border-slate-600"
+                      onClick={() => setHwStep(1)}
+                    >
+                      {t('admin.settings.hwWizard.back')}
+                    </button>
                     <button
                       type="button"
                       className="touch-btn min-h-12 px-6 rounded-xl bg-emerald-700 border border-emerald-500 font-medium"
@@ -736,7 +990,7 @@ export function SettingsPage({
                     <button
                       type="button"
                       className="touch-btn min-h-12 px-6 rounded-xl bg-slate-800 border border-slate-600"
-                      onClick={() => setHwStep(1)}
+                      onClick={() => setHwStep(2)}
                     >
                       {t('admin.settings.hwWizard.back')}
                     </button>

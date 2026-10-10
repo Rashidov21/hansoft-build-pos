@@ -177,12 +177,61 @@ async function resetSessionOnBaseChange(nextBase: string): Promise<void> {
   writeLastAuthApiBase(nextBase)
 }
 
+function _humanizeErrorDetail(detail: unknown): string | undefined {
+  if (detail == null) return undefined
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail
+      .map((x) => _humanizeErrorDetail(x))
+      .filter(Boolean)
+      .join('; ')
+  }
+  if (typeof detail === 'object') {
+    const o = detail as Record<string, unknown>
+    if (typeof o.code === 'string' && o.code) return o.code
+    if (typeof o.detail === 'string') return o.detail
+    // DRF field errors: { phone_normalized: ["..."] } or nested code
+    const parts: string[] = []
+    for (const [k, v] of Object.entries(o)) {
+      if (k === 'code' || k === 'detail') continue
+      const nested = _humanizeErrorDetail(v)
+      if (nested) {
+        if (nested.includes('CUSTOMER_PHONE_EXISTS') || nested.includes('already exists')) {
+          return 'CUSTOMER_PHONE_EXISTS'
+        }
+        parts.push(`${k}: ${nested}`)
+      }
+    }
+    if (typeof o.code === 'string') return o.code
+    return parts.length ? parts.join('; ') : undefined
+  }
+  return String(detail)
+}
+
 async function parseErrorResponse(r: Response, fallbackCode: string): Promise<AppError> {
-  const j = (await r.json().catch(() => ({}))) as { code?: string; detail?: string }
+  const j = (await r.json().catch(() => ({}))) as {
+    code?: string
+    detail?: unknown
+    phone_normalized?: unknown
+  }
   let code = j.code || fallbackCode
-  const detail = j.detail
+  let detail = _humanizeErrorDetail(j.detail)
+  // Nested ValidationError from CustomerSerializer.validate_phone_normalized
+  const phoneErr = _humanizeErrorDetail(j.phone_normalized)
+  if (phoneErr === 'CUSTOMER_PHONE_EXISTS' || detail === 'CUSTOMER_PHONE_EXISTS') {
+    code = 'CUSTOMER_PHONE_EXISTS'
+    detail = 'CUSTOMER_PHONE_EXISTS'
+  }
+  if (typeof j.detail === 'object' && j.detail && !Array.isArray(j.detail)) {
+    const d = j.detail as { code?: string }
+    if (d.code) code = d.code
+  }
   if (r.status >= 500 && !j.code) {
     code = 'BACKEND_INIT_REQUIRED'
+  }
+  // Never surface raw ErrorDetail / object dumps in UI.
+  if (detail && (detail.includes('ErrorDetail') || detail.includes('{') || detail.includes('['))) {
+    detail = code
   }
   void logApiError(`${r.status} ${r.url} code=${code} detail=${detail || '-'}`)
   return new AppError(code, detail)
@@ -1661,6 +1710,9 @@ export async function voidSale(saleId: string, reason: string): Promise<{
   }
 }
 
+/** Sticker / label stock size (mm). TSPL uses SIZE w,h; ESC/POS uses column width + barcode scale. */
+export type LabelStickerSize = '30x20' | '40x30' | '40x50' | '50x40' | '58mm'
+
 export type StoreSettings = {
   brand_name: string
   phone: string
@@ -1675,8 +1727,18 @@ export type StoreSettings = {
   label_printer_name: string
   label_printer_type: 'ESC_POS' | 'TSPL'
   label_printer_port?: string
+  /** Master switch for sticker UI (catalog / settings test). Default true. */
+  label_printing_enabled?: boolean
+  /** Store default sticker size when client omits size. */
+  default_label_size?: LabelStickerSize
+  /** TSPL GAP between labels (mm). */
+  label_gap_mm?: number | string
+  /** TSPL DIRECTION 0|1. */
+  label_direction?: number
   receipt_width: '58mm' | '80mm'
   receipt_font_size?: number
+  /** text = ESC/POS codepage; image = bitmap (Cyrillic-safe on Chinese firmware). */
+  receipt_render_mode?: 'text' | 'image'
   receipt_printing_enabled?: boolean
   auto_print_on_sale: boolean
   scanner_mode: 'keyboard' | 'serial'
@@ -1697,7 +1759,12 @@ export type HardwareConfig = Pick<
   | 'label_printer_name'
   | 'label_printer_type'
   | 'label_printer_port'
+  | 'label_printing_enabled'
+  | 'default_label_size'
+  | 'label_gap_mm'
+  | 'label_direction'
   | 'receipt_width'
+  | 'receipt_render_mode'
   | 'receipt_printing_enabled'
   | 'auto_print_on_sale'
   | 'scanner_mode'
@@ -1860,8 +1927,13 @@ export async function updateStoreSettings(data: {
   label_printer_name: string
   label_printer_type: 'ESC_POS' | 'TSPL'
   label_printer_port?: string
+  label_printing_enabled?: boolean
+  default_label_size?: LabelStickerSize
+  label_gap_mm?: number | string
+  label_direction?: number
   receipt_width: '58mm' | '80mm'
   receipt_font_size?: number
+  receipt_render_mode?: 'text' | 'image'
   receipt_printing_enabled?: boolean
   auto_print_on_sale: boolean
   receipt_lang?: string
@@ -1887,8 +1959,23 @@ export async function updateStoreSettings(data: {
   fd.append('label_printer_name', data.label_printer_name)
   fd.append('label_printer_type', data.label_printer_type)
   fd.append('label_printer_port', data.label_printer_port || '')
+  if (data.label_printing_enabled !== undefined) {
+    fd.append('label_printing_enabled', data.label_printing_enabled ? 'true' : 'false')
+  }
+  if (data.default_label_size) {
+    fd.append('default_label_size', data.default_label_size)
+  }
+  if (data.label_gap_mm !== undefined && data.label_gap_mm !== null && data.label_gap_mm !== '') {
+    fd.append('label_gap_mm', String(data.label_gap_mm))
+  }
+  if (data.label_direction !== undefined && data.label_direction !== null) {
+    fd.append('label_direction', String(data.label_direction))
+  }
   fd.append('receipt_width', data.receipt_width)
   fd.append('receipt_font_size', String(Math.max(0, Number(data.receipt_font_size || 0))))
+  if (data.receipt_render_mode === 'image' || data.receipt_render_mode === 'text') {
+    fd.append('receipt_render_mode', data.receipt_render_mode)
+  }
   fd.append('receipt_printing_enabled', data.receipt_printing_enabled ? 'true' : 'false')
   fd.append('auto_print_on_sale', data.auto_print_on_sale ? 'true' : 'false')
   fd.append('receipt_lang', data.receipt_lang || '')
@@ -1954,9 +2041,6 @@ export async function testReceiptPrintPayload() {
     printer_type: 'ESC_POS' | 'TSPL'
   }>
 }
-
-/** Sticker / label stock size (mm). TSPL uses SIZE w,h; ESC/POS uses column width + barcode scale. */
-export type LabelStickerSize = '30x20' | '40x30' | '40x50' | '50x40' | '58mm'
 
 export async function testLabelPrintPayload() {
   const csrf = (await fetchCsrf()) || getCookie('csrftoken') || ''
@@ -2275,7 +2359,7 @@ export async function adjustInventory(variantId: string, qtyDelta: number, note:
   return r.json() as Promise<{ variant_id: string; stock_qty: number }>
 }
 
-export async function fetchLabelEscpos(variantId: string, size: LabelStickerSize = '40x50', copies = 1, showPrice?: boolean) {
+export async function fetchLabelEscpos(variantId: string, size: LabelStickerSize = '40x30', copies = 1, showPrice?: boolean) {
   const csrf = (await fetchCsrf()) || getCookie('csrftoken') || ''
   const body: any = { variant_id: variantId, size, copies }
   if (showPrice !== undefined) {
@@ -2293,7 +2377,7 @@ export async function fetchLabelEscpos(variantId: string, size: LabelStickerSize
 
 export async function fetchLabelQueueEscpos(
   items: Array<{ variant_id: string; copies: number }>,
-  size: LabelStickerSize = '40x50',
+  size: LabelStickerSize = '40x30',
   showPrice?: boolean,
 ) {
   const csrf = (await fetchCsrf()) || getCookie('csrftoken') || ''

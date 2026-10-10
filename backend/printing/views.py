@@ -14,6 +14,7 @@ from .receipt import (
     nakladnoy_escpos_bytes,
     nakladnoy_plain_text,
     receipt_plain_text,
+    resolve_label_size,
     resolve_receipt_store_lang,
     sale_to_receipt_dict,
 )
@@ -196,7 +197,9 @@ class NakladnoyEscposView(APIView):
 
 
 class LabelEscposView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminOrOwner]
+    """Single sticker payload — cashier may reprint (catalog/stock UI gated separately)."""
+
+    permission_classes = [IsAuthenticated, IsCashier]
 
     def post(self, request):
         import base64
@@ -204,6 +207,7 @@ class LabelEscposView(APIView):
         ser = LabelSingleSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         settings = StoreSettings.get_solo()
+        size = resolve_label_size(settings, ser.validated_data.get("size"))
         try:
             v = ProductVariant.objects.select_related("product__category", "product").get(
                 pk=ser.validated_data["variant_id"]
@@ -214,7 +218,7 @@ class LabelEscposView(APIView):
             payload = PrinterFactory.render_label(
                 label_payload={
                     "variant": v,
-                    "size": ser.validated_data.get("size", "40x30"),
+                    "size": size,
                     "copies": ser.validated_data.get("copies", 1),
                     "show_price": ser.validated_data.get("show_price"),
                 },
@@ -228,22 +232,22 @@ class LabelEscposView(APIView):
                 "escpos_base64": base64.b64encode(payload).decode("ascii"),
                 "printer_name": settings.label_printer_name,
                 "printer_type": settings.label_printer_type,
-                "size": ser.validated_data.get("size", "40x30"),
+                "size": size,
             }
         )
 
 
 class LabelQueueEscposView(APIView):
-    permission_classes = [IsAuthenticated, IsAdminOrOwner]
+    permission_classes = [IsAuthenticated, IsCashier]
 
     def post(self, request):
         import base64
 
         ser = LabelQueueSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
-        size = ser.validated_data.get("size", "40x30")
-        show_price = ser.validated_data.get("show_price")
         settings = StoreSettings.get_solo()
+        size = resolve_label_size(settings, ser.validated_data.get("size"))
+        show_price = ser.validated_data.get("show_price")
         out = []
         requested_ids = [str(item["variant_id"]) for item in ser.validated_data["items"]]
         variants = ProductVariant.objects.select_related("product__category", "product").filter(
@@ -337,14 +341,25 @@ class TestLabelPrintView(APIView):
         import base64
 
         settings = StoreSettings.get_solo()
+        size = resolve_label_size(settings, None)
+        # custom_name_* filled so TSPL/ESC/POS name line is not empty on test stickers.
         variant = SimpleNamespace(
             barcode="TEST123456",
             list_price="100000",
-            product=SimpleNamespace(name_uz="Demo", category=SimpleNamespace(name_uz="BrandCat")),
+            show_price_on_label=True,
+            product=SimpleNamespace(
+                name_uz="Demo tovar",
+                name_ru="Demo tovar",
+                name_uz_cyrillic="",
+                custom_name_uz="Demo tovar",
+                custom_name_ru="Demo tovar",
+                custom_name_uz_cyrillic="",
+                category=SimpleNamespace(name_uz="BrandCat"),
+            ),
         )
         try:
             raw = PrinterFactory.render_label(
-                label_payload={"variant": variant, "size": "40x30", "copies": 1},
+                label_payload={"variant": variant, "size": size, "copies": 1, "show_price": True},
                 settings=settings,
             )
         except (FileNotFoundError, OSError) as exc:
@@ -356,6 +371,6 @@ class TestLabelPrintView(APIView):
                 "escpos_base64": encoded,
                 "printer_name": settings.label_printer_name,
                 "printer_type": settings.label_printer_type,
-                "size": "40x30",
+                "size": size,
             }
         )

@@ -883,15 +883,21 @@ function AdminPanel(props: {
     label_printer_name: string
     label_printer_type: 'ESC_POS' | 'TSPL'
     label_printer_port?: string
+    label_printing_enabled?: boolean
+    default_label_size?: '30x20' | '40x30' | '40x50' | '50x40' | '58mm'
     receipt_lang?: string
     receipt_width: '58mm' | '80mm'
     receipt_font_size?: number
+    receipt_render_mode?: 'text' | 'image'
     receipt_printing_enabled?: boolean
     auto_print_on_sale: boolean
     scanner_mode: 'keyboard' | 'serial'
     scanner_prefix: string
     scanner_suffix: string
     lock_timeout_minutes?: number
+    show_price_on_labels_default?: boolean
+    show_selling_price_in_catalog?: boolean
+    low_stock_threshold?: number
     logo?: File | null
   }) => Promise<void>
   onFilterSales: (from: string, to: string, q: string) => void
@@ -1096,6 +1102,7 @@ function AdminPanel(props: {
                   onReloadOpen={props.onReloadOpenStocktake}
                   onSetCount={props.onSetStocktakeCount}
                   onApplyStocktake={props.onApplyStocktake}
+                  settings={props.settings}
                 />
               )
             }
@@ -1116,7 +1123,7 @@ function AdminPanel(props: {
             path="stock"
             element={
               isCashier ? (
-                <CashStockPage role={props.role} />
+                <CashStockPage role={props.role} settings={props.settings} />
               ) : (
                 <Navigate to="/admin/inventory" replace />
               )

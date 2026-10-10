@@ -6,10 +6,14 @@ from django.contrib.auth.models import User
 from django.db import IntegrityError, OperationalError, transaction
 
 from catalog.models import ProductVariant
+from accounts.models import Role
 from core.exceptions import (
+    BelowCostError,
     DebtPolicyError,
     InsufficientStock,
     InvalidPaymentSplit,
+    NoOpenShiftError,
+    PriceFloorError,
 )
 from core.qty import parse_qty, validate_sale_qty
 from debt.models import Customer, Debt
@@ -17,7 +21,7 @@ from inventory.models import InventoryMovement
 from inventory.services import apply_movement
 from core.audit import log_audit
 
-from .models import Payment, Sale, SaleLine
+from .models import Payment, Sale, SaleLine, SaleRefund
 from .return_state import remaining_return_line_payloads
 from .refund_utils import (
     allocate_auto_refunds,
@@ -45,6 +49,27 @@ def _next_public_sale_no() -> str:
     return f"S-{seq:06d}"
 
 
+def _actor_is_manager(user: User) -> bool:
+    if getattr(user, "is_superuser", False):
+        return True
+    profile = getattr(user, "profile", None)
+    if not profile:
+        return False
+    return profile.role in (Role.ADMIN, Role.OWNER)
+
+
+def _tier_floor_price(variant: ProductVariant, price_tier: str) -> Decimal | None:
+    """Catalog floor for the selected tier (retail list or wholesale)."""
+    tier = (price_tier or "retail").strip().lower()
+    if tier == "wholesale" and variant.wholesale_price is not None:
+        return _q(variant.wholesale_price)
+    if variant.list_price is not None:
+        return _q(variant.list_price)
+    if variant.wholesale_price is not None:
+        return _q(variant.wholesale_price)
+    return None
+
+
 def complete_sale(
     *,
     idempotency_key: str,
@@ -57,6 +82,7 @@ def complete_sale(
     debt_due_date=None,
     debt_installment_months: int | None = None,
     note: str = "",
+    confirm_below_cost: bool = False,
 ) -> Sale:
     if not idempotency_key or len(idempotency_key) > 64:
         raise ValueError("Idempotency-Key required (max 64 chars)")
@@ -86,6 +112,7 @@ def complete_sale(
                     debt_due_date=debt_due_date,
                     debt_installment_months=debt_installment_months,
                     note=note,
+                    confirm_below_cost=confirm_below_cost,
                 )
                 return sale
         except IntegrityError:
@@ -110,12 +137,15 @@ def _complete_sale_inner(
     debt_due_date,
     debt_installment_months: int | None,
     note: str,
+    confirm_below_cost: bool = False,
 ) -> Sale:
     from .models import CardBank
 
     parsed_lines: list[dict[str, Any]] = []
     subtotal = Decimal("0")
     discount_total = Decimal("0")
+    is_manager = _actor_is_manager(cashier)
+    below_cost_lines: list[str] = []
 
     for raw in lines:
         vid = raw["variant_id"]
@@ -160,6 +190,20 @@ def _complete_sale_inner(
                 list_price = _q(v.list_price)
             else:
                 raise ValueError("Unit price required for variant without list_price")
+            if list_price < 0:
+                raise ValueError("Unit price cannot be negative")
+
+            price_tier = str(raw.get("price_tier") or "retail").strip().lower()
+            if price_tier not in ("retail", "wholesale"):
+                price_tier = "retail"
+            floor = _tier_floor_price(v, price_tier)
+            if not is_manager and floor is not None and list_price < floor:
+                raise PriceFloorError(
+                    f"Unit price {list_price} below {price_tier} floor {floor} for variant {vid}"
+                )
+            # Tannarx: faqat admin/owner — confirm_below_cost; kassir uchun yetarli himoya = tier floor.
+            if is_manager and list_price < _q(v.purchase_price):
+                below_cost_lines.append(str(vid))
 
             # Avval qator jami, keyin net_unit — butun so'm roundingda 1 so'm farq chiqmasin
             line_sub = _q(list_price * Decimal(qty))
@@ -183,6 +227,11 @@ def _complete_sale_inner(
                 "line_total": line_total,
                 "is_bonus": is_bonus,
             }
+        )
+
+    if below_cost_lines and not confirm_below_cost:
+        raise BelowCostError(
+            "Sale has lines below purchase cost; confirm_below_cost required"
         )
 
     order_discount_amount = _q(Decimal(str(order_discount or "0")))
@@ -241,10 +290,21 @@ def _complete_sale_inner(
         else:
             months = None
 
+    from expenses.models import Shift
+
+    open_shift = (
+        Shift.objects.filter(cashier=cashier, status=Shift.Status.OPEN)
+        .order_by("-opened_at")
+        .first()
+    )
+    if not open_shift:
+        raise NoOpenShiftError("Open shift required before completing a sale")
+
     sale = Sale.objects.create(
         public_sale_no=_next_public_sale_no(),
         idempotency_key=idempotency_key,
         cashier=cashier,
+        shift=open_shift,
         subtotal=_q(subtotal),
         discount_total=_q(discount_total),
         grand_total=_q(grand_total),
@@ -327,6 +387,149 @@ def _resolve_customer(data: dict[str, Any]) -> Customer:
         cust.name = name
         cust.save(update_fields=["name"])
     return cust
+
+
+def _sync_payments_to_grand_total(*, sale: Sale, new_grand_total: Decimal) -> list[dict[str, str]]:
+    """
+    Adjust payment rows so sum(amount) == new_grand_total.
+    Prefers CASH, then CARD, then DEBT. Updates linked Debt when DEBT amount changes.
+    """
+    new_grand_total = _q(new_grand_total)
+    if new_grand_total < 0:
+        raise ValueError("Grand total cannot be negative")
+
+    payments = list(sale.payments.all().order_by("id"))
+    old_sum = _q(sum((p.amount for p in payments), Decimal("0")))
+    old_debt_total = _q(
+        sum((p.amount for p in payments if p.method == Payment.Method.DEBT), Decimal("0"))
+    )
+    delta = _q(new_grand_total - old_sum)
+    if delta == 0:
+        return [{"method": p.method, "amount": str(p.amount)} for p in payments]
+
+    if not payments:
+        if new_grand_total == 0:
+            return []
+        raise ValueError("Cannot adjust payments: sale has no payment rows")
+
+    method_rank = {Payment.Method.CASH: 0, Payment.Method.CARD: 1, Payment.Method.DEBT: 2}
+    ordered = sorted(payments, key=lambda p: (method_rank.get(p.method, 9), str(p.id)))
+
+    remaining_delta = delta
+    for pay in ordered:
+        if remaining_delta == 0:
+            break
+        candidate = _q(pay.amount + remaining_delta)
+        if candidate < 0:
+            remaining_delta = candidate
+            pay.amount = Decimal("0")
+            pay.save(update_fields=["amount"])
+            continue
+        pay.amount = candidate
+        pay.save(update_fields=["amount"])
+        remaining_delta = Decimal("0")
+
+    if remaining_delta != 0:
+        raise ValueError("Cannot redistribute payment delta across existing methods")
+
+    sale.payments.filter(amount=0).delete()
+
+    new_debt_total = _q(
+        sum(
+            (p.amount for p in sale.payments.filter(method=Payment.Method.DEBT)),
+            Decimal("0"),
+        )
+    )
+    debt_delta = _q(new_debt_total - old_debt_total)
+    if debt_delta != 0:
+        debt = Debt.objects.filter(originating_sale_id=sale.pk).first()
+        if debt:
+            debt.total_amount = _q(max(Decimal("0"), debt.total_amount + debt_delta))
+            debt.remaining_amount = _q(max(Decimal("0"), debt.total_amount - debt.paid_amount))
+            if debt.remaining_amount <= 0:
+                debt.remaining_amount = Decimal("0")
+                debt.status = Debt.Status.PAID
+            elif debt.status == Debt.Status.PAID and debt.remaining_amount > 0:
+                debt.status = Debt.Status.OPEN
+            debt.save(update_fields=["total_amount", "remaining_amount", "status", "updated_at"])
+
+    return [
+        {"method": p.method, "amount": str(p.amount)}
+        for p in sale.payments.all().order_by("id")
+    ]
+
+
+@transaction.atomic
+def edit_sale_line_price(*, sale: Sale, line: SaleLine, new_price: Decimal, user: User | None = None) -> dict[str, Any]:
+    """Admin: change list_unit_price on a completed sale line and keep payments in sync."""
+    if sale.status != Sale.Status.COMPLETED:
+        raise ValueError("Only completed sales can have line prices edited")
+    if SaleRefund.objects.filter(sale=sale, reversed_at__isnull=True).exists():
+        raise ValueError("Cannot edit price after refunds/returns")
+    if line.is_bonus:
+        raise ValueError("Cannot edit price on bonus lines")
+
+    new_price = _q(new_price)
+    if new_price < 0:
+        raise ValueError("Price cannot be negative")
+
+    qty = Decimal(str(line.qty))
+    if qty <= 0:
+        raise ValueError("Invalid line quantity")
+
+    old_price = line.list_unit_price
+    old_line_total = line.line_total
+    old_grand = sale.grand_total
+    line_discount_per_unit = line.line_discount / qty
+    new_net_unit = _q(new_price - line_discount_per_unit)
+    if new_net_unit < 0:
+        raise ValueError("Net price cannot be negative after discount")
+
+    price_diff = new_price - old_price
+    new_line_total = _q(new_net_unit * qty)
+    new_subtotal = _q(sale.subtotal + (price_diff * qty))
+    new_grand_total = _q(new_subtotal - sale.discount_total)
+    if new_grand_total < 0:
+        raise ValueError("Sale grand total cannot be negative")
+
+    line.list_unit_price = new_price
+    line.net_unit_price = new_net_unit
+    line.line_total = new_line_total
+    line.save(update_fields=["list_unit_price", "net_unit_price", "line_total"])
+
+    sale.subtotal = new_subtotal
+    sale.grand_total = new_grand_total
+    sale.save(update_fields=["subtotal", "grand_total"])
+
+    payments = _sync_payments_to_grand_total(sale=sale, new_grand_total=new_grand_total)
+
+    log_audit(
+        event_type="sale_line_price_edited",
+        actor=user.username if user else None,
+        entity_id=str(sale.id),
+        payload={
+            "line_id": str(line.id),
+            "old_price": str(old_price),
+            "new_price": str(new_price),
+            "product_name": line.variant.product.name_uz,
+            "barcode": line.variant.barcode,
+            "qty": str(qty),
+            "old_line_total": str(old_line_total),
+            "new_line_total": str(new_line_total),
+            "old_sale_grand_total": str(old_grand),
+            "new_sale_grand_total": str(new_grand_total),
+            "payments": payments,
+        },
+    )
+    return {
+        "line_id": str(line.id),
+        "sale_id": str(sale.id),
+        "old_price": str(old_price),
+        "new_price": str(new_price),
+        "line_total": str(new_line_total),
+        "sale_grand_total": str(new_grand_total),
+        "payments": payments,
+    }
 
 
 @transaction.atomic

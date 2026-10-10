@@ -5,6 +5,7 @@ import Decimal from 'decimal.js'
 import {
   AppError,
   CARD_BANKS,
+  checkShiftStatus,
   completeSale,
   fetchHardwareConfig,
   fetchStoreSettings,
@@ -1007,11 +1008,33 @@ export function PosPage({
     setCompleting(true)
 
     try {
+      try {
+        const shift = await checkShiftStatus()
+        if (!shift.has_open_shift) {
+          beepError()
+          setBanner(
+            t('err.NO_OPEN_SHIFT', {
+              defaultValue: 'Smena ochilmagan. Avval smenani oching.',
+            }),
+          )
+          showToast(
+            'err',
+            t('err.NO_OPEN_SHIFT', {
+              defaultValue: 'Smena ochilmagan. Avval smenani oching.',
+            }),
+          )
+          return
+        }
+      } catch {
+        // Offline / API: backend still enforces NO_OPEN_SHIFT on complete.
+      }
+
       const lines = cart.map((l) => ({
         variant_id: l.variantId,
         qty: l.qty,
         line_discount: '0',
         unit_price: parseSom(l.listPrice).toString(),
+        price_tier: l.priceTier === 'wholesale' ? 'wholesale' : 'retail',
         is_bonus: Boolean(l.isBonus),
       }))
       const payments = normalizedPays.map((p) => ({
@@ -1058,18 +1081,36 @@ export function PosPage({
         idem = crypto.randomUUID()
       }
 
-      const res = await completeSale(
-        {
-          lines,
-          payments,
-          order_discount: discountDec.toString(),
-          customer,
-          debt_due_date: hasDebt && debtDueDate ? debtDueDate : null,
-          debt_installment_months: debtMonths,
-          expected_grand_total: grandDec.toString(),
-        },
-        idem,
-      )
+      const saleBody = {
+        lines,
+        payments,
+        order_discount: discountDec.toString(),
+        customer,
+        debt_due_date: hasDebt && debtDueDate ? debtDueDate : null,
+        debt_installment_months: debtMonths,
+        expected_grand_total: grandDec.toString(),
+      }
+      let res
+      try {
+        res = await completeSale(saleBody, idem)
+      } catch (firstErr: unknown) {
+        const firstCode =
+          firstErr instanceof AppError
+            ? firstErr.code
+            : (firstErr as Error & { code?: string }).code
+        if (firstCode === 'BELOW_COST' && showPurchasePrice) {
+          const ok = window.confirm(
+            t('pos.confirmBelowCost', {
+              defaultValue:
+                "Ba'zi qatorlar tannarxdan past. Davom etasizmi?",
+            }),
+          )
+          if (!ok) throw firstErr
+          res = await completeSale({ ...saleBody, confirm_below_cost: true }, idem)
+        } else {
+          throw firstErr
+        }
+      }
       idempotencyGenRef.current += 1
       try {
         sessionStorage.removeItem('geeks_pos_pending_sale_idem')

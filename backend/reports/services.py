@@ -20,10 +20,19 @@ def q_money(value) -> Decimal:
     return Decimal(str(value or 0)).quantize(ROUND_UNIT, rounding=ROUND_HALF_UP)
 
 
-def _refund_sums(*, from_date: str | None = None, to_date: str | None = None, sale_ids=None):
-    qs = SaleRefund.objects.all()
+def _refund_sums(
+    *,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    sale_ids=None,
+    exclude_voided_sales: bool = False,
+):
+    qs = SaleRefund.objects.filter(reversed_at__isnull=True)
     if sale_ids is not None:
         qs = qs.filter(sale_id__in=sale_ids)
+    if exclude_voided_sales:
+        # Void: to'lov allaqachon COMPLETED dan chiqadi — refundni yana ayirish ikki marta.
+        qs = qs.exclude(sale__status=Sale.Status.VOIDED)
     if from_date:
         qs = qs.filter(created_at__date__gte=from_date)
     if to_date:
@@ -35,8 +44,11 @@ def _refund_sums(*, from_date: str | None = None, to_date: str | None = None, sa
     return {"cash": cash, "card": card, "debt": debt, "total": total}
 
 
-def _refund_sums_for_date(day):
-    qs = SaleRefund.objects.filter(created_at__date=day)
+def _refund_sums_for_date(day, *, exclude_voided_sales: bool = True):
+    """Kunlik usul net uchun: default void sotuv refundlarini chiqaradi."""
+    qs = SaleRefund.objects.filter(created_at__date=day, reversed_at__isnull=True)
+    if exclude_voided_sales:
+        qs = qs.exclude(sale__status=Sale.Status.VOIDED)
     cash = q_money(qs.filter(method=SaleRefund.Method.CASH).aggregate(t=Sum("amount"))["t"])
     card = q_money(qs.filter(method=SaleRefund.Method.CARD).aggregate(t=Sum("amount"))["t"])
     debt = q_money(qs.filter(method=SaleRefund.Method.DEBT).aggregate(t=Sum("amount"))["t"])
@@ -152,7 +164,10 @@ def sales_metrics(*, from_date: str | None = None, to_date: str | None = None):
     today_debt_in = q_money(
         Payment.objects.filter(sale__in=today_completed, method=Payment.Method.DEBT).aggregate(total=Sum("amount"))["total"]
     )
-    today_refund_cash, today_refund_card, today_refund_debt = _refund_sums_for_date(today)
+    # Faqat COMPLETED sotuv refundlari — void refundlari card/cash_in dan allaqachon chiqqan.
+    today_refund_cash, today_refund_card, today_refund_debt = _refund_sums_for_date(
+        today, exclude_voided_sales=True
+    )
     today_cash_total = q_money(today_cash_in - today_refund_cash)
     today_card_total = q_money(today_card_in - today_refund_card)
     today_debt_total = q_money(today_debt_in - today_refund_debt)
@@ -436,8 +451,9 @@ def sales_metrics(*, from_date: str | None = None, to_date: str | None = None):
     today_card_by_bank = _card_by_bank(today_completed)
     card_by_bank = _card_by_bank(completed)
 
+    # today_cash_total allaqachon refund-net — refundni yana ayirmaslik.
     today_cash_net_flow = q_money(
-        Decimal(str(today_cash_total)) - Decimal(str(today_refund_cash)) - Decimal(str(today_expense_total))
+        Decimal(str(today_cash_total)) - Decimal(str(today_expense_total))
     )
 
     return {
@@ -570,6 +586,7 @@ def cashier_x_report_metrics(*, cashier_id, from_dt, to_dt):
         sale__in=completed,
         created_at__gte=from_dt,
         created_at__lte=to_dt,
+        reversed_at__isnull=True,
     )
     refund_cash = q_money(x_refunds.filter(method=SaleRefund.Method.CASH).aggregate(t=Sum("amount"))["t"])
     refund_card = q_money(x_refunds.filter(method=SaleRefund.Method.CARD).aggregate(t=Sum("amount"))["t"])

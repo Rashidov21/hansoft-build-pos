@@ -132,38 +132,55 @@ def _run_migrations_with_retry(max_attempts: int = 5) -> None:
 
     call_command('migrate') must run only after django.setup(); otherwise
     AppRegistryNotReady / translation errors occur in packaged PyInstaller builds.
+
+    Schedulers are deferred (HANSOFT_DEFER_SCHEDULERS) until migrate succeeds so
+    backup/low-stock threads do not query missing columns on first upgrade boot.
     """
     import django
     from django.core.management import call_command
 
     _quarantine_corrupt_sqlite_if_needed()
-    django.setup()
+    os.environ["HANSOFT_DEFER_SCHEDULERS"] = "1"
+    try:
+        django.setup()
 
-    for attempt in range(1, max_attempts + 1):
-        try:
-            from accounts.bootstrap import ensure_default_users_and_pins
-            call_command("migrate", interactive=False, verbosity=0)
-            ensure_default_users_and_pins()
-            print("Migrations OK.")
-            return
-        except Exception as exc:
-            msg = str(exc).lower()
-            retriable = (
-                "database is locked" in msg
-                or "locked" in msg
-                or "malformed" in msg
-                or "disk image" in msg
-            )
-            if ("malformed" in msg or "disk image" in msg) and attempt == 1:
-                _quarantine_corrupt_sqlite_if_needed()
-                continue
-            print(f"MIGRATE_ATTEMPT_{attempt}: {type(exc).__name__}: {exc}", file=sys.stderr)
-            if attempt >= max_attempts or not retriable:
-                traceback.print_exc(file=sys.stderr)
-                raise
-            wait_s = min(8, 2 * attempt)
-            print(f"Bootstrap retry {attempt}/{max_attempts} after lock: {exc}")
-            time.sleep(wait_s)
+        for attempt in range(1, max_attempts + 1):
+            try:
+                from accounts.bootstrap import ensure_default_users_and_pins
+                call_command("migrate", interactive=False, verbosity=0)
+                ensure_default_users_and_pins()
+                print("Migrations OK.")
+                return
+            except Exception as exc:
+                msg = str(exc).lower()
+                retriable = (
+                    "database is locked" in msg
+                    or "locked" in msg
+                    or "malformed" in msg
+                    or "disk image" in msg
+                )
+                if ("malformed" in msg or "disk image" in msg) and attempt == 1:
+                    _quarantine_corrupt_sqlite_if_needed()
+                    continue
+                print(f"MIGRATE_ATTEMPT_{attempt}: {type(exc).__name__}: {exc}", file=sys.stderr)
+                if attempt >= max_attempts or not retriable:
+                    traceback.print_exc(file=sys.stderr)
+                    raise
+                wait_s = min(8, 2 * attempt)
+                print(f"Bootstrap retry {attempt}/{max_attempts} after lock: {exc}")
+                time.sleep(wait_s)
+    finally:
+        os.environ.pop("HANSOFT_DEFER_SCHEDULERS", None)
+
+
+def _start_schedulers_after_migrate() -> None:
+    try:
+        from core.apps import start_background_schedulers
+
+        started = start_background_schedulers()
+        print("SCHEDULERS_STARTED" if started else "SCHEDULERS_ALREADY_RUNNING")
+    except Exception as exc:
+        print(f"WARN: schedulers not started: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
 def _self_check() -> int:
@@ -197,6 +214,7 @@ def _self_check() -> int:
 
 
 def _health_ok(port: int) -> bool:
+    import json
     import urllib.error
     import urllib.request
 
@@ -204,8 +222,14 @@ def _health_ok(port: int) -> bool:
         with urllib.request.urlopen(
             f"http://127.0.0.1:{port}/api/health/", timeout=2
         ) as resp:
-            return resp.status == 200
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+            if resp.status != 200:
+                return False
+            body = json.loads(resp.read().decode("utf-8", errors="replace"))
+            return (
+                body.get("status") == "ok"
+                and body.get("service") == "hansoft-build-pos-api"
+            )
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError):
         return False
 
 
@@ -240,6 +264,7 @@ def main() -> None:
         print(f"DB_PATH={settings.DATABASES['default']['NAME']}")
         try:
             _run_migrations_with_retry()
+            _start_schedulers_after_migrate()
         except Exception as exc:
             print(f"BOOTSTRAP_FAIL: {type(exc).__name__}: {exc}", file=sys.stderr)
             traceback.print_exc(file=sys.stderr)

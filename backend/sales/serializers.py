@@ -19,7 +19,13 @@ class SaleLineInSerializer(serializers.Serializer):
         decimal_places=2,
         required=False,
         allow_null=True,
+        min_value=Decimal("0"),
         help_text="Optional: override variant list_price at sale time. Required if variant has no list_price."
+    )
+    price_tier = serializers.ChoiceField(
+        choices=["retail", "wholesale"],
+        required=False,
+        default="retail",
     )
     is_bonus = serializers.BooleanField(required=False, default=False)
 
@@ -57,6 +63,7 @@ class CompleteSaleSerializer(serializers.Serializer):
         required=False, allow_null=True, min_value=1, max_value=60
     )
     note = serializers.CharField(required=False, allow_blank=True, default="")
+    confirm_below_cost = serializers.BooleanField(required=False, default=False)
 
 
 class SaleHistorySerializer(serializers.ModelSerializer):

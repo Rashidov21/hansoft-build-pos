@@ -56,7 +56,7 @@ def _payments_in_by_method(sale: Sale) -> dict[str, Decimal]:
 
 def _refunds_out_by_method(sale: Sale) -> dict[str, Decimal]:
     out: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
-    for r in SaleRefund.objects.filter(sale=sale):
+    for r in SaleRefund.objects.filter(sale=sale, reversed_at__isnull=True):
         out[r.method] += Decimal(str(r.amount))
     return out
 
@@ -99,7 +99,7 @@ def refund_capacity_by_method(sale: Sale, *, for_void: bool = False) -> dict[str
 
 def refunds_already_list(sale: Sale) -> list[dict[str, str]]:
     rows = (
-        SaleRefund.objects.filter(sale=sale)
+        SaleRefund.objects.filter(sale=sale, reversed_at__isnull=True)
         .order_by("created_at", "id")
         .values("method", "amount")
     )

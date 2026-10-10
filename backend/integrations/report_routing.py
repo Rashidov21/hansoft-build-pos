@@ -125,10 +125,12 @@ def ensure_channels_from_legacy() -> None:
             ).first()
         )
         if tg_ch:
-            if tg_ch.address != tg or not tg_ch.is_active:
+            # Nofaol kanalni qayta yoqmang — foydalanuvchi ataylab o'chirgan bo'lishi mumkin.
+            if tg_ch.is_active and tg_ch.address != tg:
                 tg_ch.address = tg
-                tg_ch.is_active = True
-                tg_ch.save(update_fields=["address", "is_active", "updated_at"])
+                tg_ch.save(update_fields=["address", "updated_at"])
+            if not tg_ch.is_active:
+                tg_ch = None
         else:
             tg_ch = ReportChannel.objects.create(
                 name="Egasi (Telegram)",
@@ -146,10 +148,11 @@ def ensure_channels_from_legacy() -> None:
             ).first()
         )
         if wa_ch:
-            if wa_ch.address != wa or not wa_ch.is_active:
+            if wa_ch.is_active and wa_ch.address != wa:
                 wa_ch.address = wa
-                wa_ch.is_active = True
-                wa_ch.save(update_fields=["address", "is_active", "updated_at"])
+                wa_ch.save(update_fields=["address", "updated_at"])
+            if not wa_ch.is_active:
+                wa_ch = None
         else:
             wa_ch = ReportChannel.objects.create(
                 name="Egasi (WhatsApp)",

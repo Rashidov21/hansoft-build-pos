@@ -12,10 +12,15 @@ Bu hujjat dastur **tashqi** muhit muammolarini kamaytirish uchun qisqa ro‘yxat
 - USB port almashganda skaner odatda qayta ishlaydi; **COM-serial** rejimi loyihada alohida reconnect logikasi talab qiladi (hozircha asosan keyboard rejimi).
 - Skaner “prefix/suffix” sozlamalari: **Settings** → skaner qoidasi (Enter o‘rniga Tab va hokazo).
 
-## Printer
+## Printer (chek + stiker)
 
 - Windows **Print Spooler** xizmati ishlamoqda bo‘lishi kerak.
-- Test sahifa chiqadi-yu dasturda chiqmasa: dasturdagi printer nomi va **RAW/ESC-POS** mosligi, shuningdek `printingHub` xabarlarini tekshiring.
+- Chek: **XP-80C**, ESC/POS, RAW queue. Stiker: **XP-365B**, TSPL, RAW queue. Spec: [`HARDWARE_CONFIG.md`](../HARDWARE_CONFIG.md).
+- Test sahifa chiqadi-yu dasturda chiqmasa: Sozlamalardagi printer **nomi** Windows ro‘yxati bilan bir xilmi; driverda **RAW** (ESC/POS yoki TSPL) yoqilganmi; `printingHub` toast xabarlarini tekshiring.
+- Port maydoni (`USB001` / `USB002`) — haqiqiy COM emas; faqat Windows printer **nomi** ichida qidiruv hint.
+- Fallback model qidiruvi: chek → `XP-80C`, stiker → `XP-365B`.
+- Sozlamalar: wizard step 1 (chek) → step 2 (stiker) → step 3 (skaner). Katalog reprint: Amallar → Etiketka.
+- Qabul qadamlari: [`FIRST_RUN_ACCEPTANCE_CHECKLIST.md`](FIRST_RUN_ACCEPTANCE_CHECKLIST.md) § Printer & label; qurilish: [`qurilish-mollari/12-printer-etiketka.md`](qurilish-mollari/12-printer-etiketka.md).
 
 ## SQLite / ma’lumotlar
 

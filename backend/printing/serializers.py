@@ -5,6 +5,12 @@ from rest_framework import serializers
 from .models import StoreSettings
 
 
+def _validate_label_direction(value: int) -> int:
+    if value not in (0, 1):
+        raise serializers.ValidationError("label_direction must be 0 or 1.")
+    return value
+
+
 class StoreSettingsSerializer(serializers.ModelSerializer):
     logo_url = serializers.SerializerMethodField(read_only=True)
 
@@ -27,8 +33,13 @@ class StoreSettingsSerializer(serializers.ModelSerializer):
             "label_printer_name",
             "label_printer_type",
             "label_printer_port",
+            "label_printing_enabled",
+            "default_label_size",
+            "label_gap_mm",
+            "label_direction",
             "receipt_width",
             "receipt_font_size",
+            "receipt_render_mode",
             "receipt_printing_enabled",
             "auto_print_on_sale",
             "scanner_mode",
@@ -42,6 +53,12 @@ class StoreSettingsSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "logo_url", "updated_at"]
 
+    def validate_receipt_render_mode(self, value):
+        v = (value or "text").strip().lower()
+        if v not in ("text", "image"):
+            raise serializers.ValidationError("receipt_render_mode must be text or image.")
+        return v
+
     def validate_receipt_lang(self, value):
         v = (value or "").strip().lower()
         if not v:
@@ -49,6 +66,15 @@ class StoreSettingsSerializer(serializers.ModelSerializer):
         if v in ("uz", "ru", "ky"):
             return v
         raise serializers.ValidationError("receipt_lang must be uz, ru, ky, or empty for auto.")
+
+    def validate_label_direction(self, value):
+        return _validate_label_direction(int(value))
+
+    def validate_label_gap_mm(self, value):
+        gap = Decimal(str(value))
+        if gap < Decimal("0.5") or gap > Decimal("20"):
+            raise serializers.ValidationError("label_gap_mm must be between 0.5 and 20.")
+        return gap
 
     def get_logo_url(self, obj):
         if not obj.logo:
@@ -59,12 +85,28 @@ class StoreSettingsSerializer(serializers.ModelSerializer):
         return obj.logo.url
 
 
-class LabelSingleSerializer(serializers.Serializer):
+_LABEL_SIZE_CHOICES = ["30x20", "40x30", "40x50", "50x40", "58mm"]
+
+
+class _LabelSizeMixin:
+    """Treat missing/blank size as None so views resolve store default_label_size."""
+
+    def validate_size(self, value):
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+
+class LabelSingleSerializer(_LabelSizeMixin, serializers.Serializer):
     variant_id = serializers.UUIDField()
     size = serializers.ChoiceField(
-        choices=["30x20", "40x30", "40x50", "50x40", "58mm"],
+        choices=_LABEL_SIZE_CHOICES,
         required=False,
-        default="40x30",
+        allow_null=True,
+        allow_blank=True,
+        default=None,
     )
     copies = serializers.IntegerField(min_value=1, max_value=200, required=False, default=1)
     show_price = serializers.BooleanField(required=False, allow_null=True)
@@ -75,11 +117,13 @@ class LabelQueueItemSerializer(serializers.Serializer):
     copies = serializers.IntegerField(min_value=1, max_value=200)
 
 
-class LabelQueueSerializer(serializers.Serializer):
+class LabelQueueSerializer(_LabelSizeMixin, serializers.Serializer):
     size = serializers.ChoiceField(
-        choices=["30x20", "40x30", "40x50", "50x40", "58mm"],
+        choices=_LABEL_SIZE_CHOICES,
         required=False,
-        default="40x30",
+        allow_null=True,
+        allow_blank=True,
+        default=None,
     )
     items = LabelQueueItemSerializer(many=True)
     show_price = serializers.BooleanField(required=False, allow_null=True)
@@ -95,7 +139,12 @@ class HardwareConfigSerializer(serializers.ModelSerializer):
             "label_printer_name",
             "label_printer_type",
             "label_printer_port",
+            "label_printing_enabled",
+            "default_label_size",
+            "label_gap_mm",
+            "label_direction",
             "receipt_width",
+            "receipt_render_mode",
             "receipt_printing_enabled",
             "auto_print_on_sale",
             "scanner_mode",
@@ -103,6 +152,15 @@ class HardwareConfigSerializer(serializers.ModelSerializer):
             "scanner_suffix",
             "lock_timeout_minutes",
         ]
+
+    def validate_label_direction(self, value):
+        return _validate_label_direction(int(value))
+
+    def validate_receipt_render_mode(self, value):
+        v = (value or "text").strip().lower()
+        if v not in ("text", "image"):
+            raise serializers.ValidationError("receipt_render_mode must be text or image.")
+        return v
 
 
 class NakladnoyLineSerializer(serializers.Serializer):

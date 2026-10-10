@@ -118,6 +118,20 @@ def test_label_endpoints_owner_allowed(client):
 
 
 @pytest.mark.django_db
+def test_label_endpoints_cashier_allowed(client):
+    cashier = _mk_user("cashier_label", "CASHIER")
+    variant = _mk_variant()
+    client.force_login(cashier)
+    r = client.post(
+        "/api/printing/labels/escpos/",
+        data={"variant_id": str(variant.id), "size": "40x30", "copies": 1},
+        content_type="application/json",
+    )
+    assert r.status_code == 200
+    assert "escpos_base64" in r.json()
+
+
+@pytest.mark.django_db
 def test_hardware_config_visible_for_cashier(client):
     cashier = _mk_user("cashier_hw_cfg", "CASHIER")
     client.force_login(cashier)

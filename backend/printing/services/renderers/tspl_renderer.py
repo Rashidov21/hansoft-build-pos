@@ -197,9 +197,9 @@ class TsplRenderer:
             _label_custom_name,
             _label_sell_price,
             label_currency_suffix,
+            prepare_tspl_label_text,
             resolve_label_show_price,
             resolve_receipt_store_lang,
-            transliterate_uz,
         )
 
         variant = label_payload["variant"]
@@ -212,10 +212,10 @@ class TsplRenderer:
         barcode = (variant.barcode or "").strip() or "0"
         store_lang = resolve_receipt_store_lang(settings, None)
         raw_custom = _label_custom_name(variant.product, store_lang)
-        if store_lang != "ru" and getattr(settings, "transliterate_uz", True):
-            raw_custom = transliterate_uz(raw_custom)
+        # XP-365B built-in TEXT is ASCII-only: always transliterate Cyrillic
+        # (uz/ru/uz-cyrl), independent of receipt_lang / transliterate_uz flag.
         name_max = 12 if size_key.strip().lower() == "30x20" else 28
-        custom = _tspl_literal(raw_custom, max_len=name_max)
+        custom = prepare_tspl_label_text(raw_custom, max_len=name_max)
         sell = _label_sell_price(variant)
         price = ""
         if print_price and sell is not None:
@@ -247,11 +247,25 @@ class TsplRenderer:
             (w_dots - _text_width_dots(price, char_dots=lay["price_char"])) // 2,
         ) if print_price and price else 0
 
-        gap_cmd = "GAP 1.5 mm,0 mm" if size_key.strip().lower() == "30x20" else "GAP 2 mm,0 mm"
+        # Store gap (mm); micro labels default tighter if store still on 2.0.
+        try:
+            gap_mm = float(getattr(settings, "label_gap_mm", 2) or 2)
+        except (TypeError, ValueError):
+            gap_mm = 2.0
+        if size_key.strip().lower() == "30x20" and abs(gap_mm - 2.0) < 0.05:
+            gap_mm = 1.5
+        gap_mm = max(0.5, min(20.0, gap_mm))
+        try:
+            direction = int(getattr(settings, "label_direction", 1) or 1)
+        except (TypeError, ValueError):
+            direction = 1
+        if direction not in (0, 1):
+            direction = 1
+        gap_cmd = f"GAP {gap_mm:g} mm,0 mm"
         header = [
             f"SIZE {w_mm} mm,{h_mm} mm",
             gap_cmd,
-            "DIRECTION 1",
+            f"DIRECTION {direction}",
         ]
         blocks: list[str] = []
         for _ in range(copies):

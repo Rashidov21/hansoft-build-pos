@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { StocktakeSession, UserRole, Variant } from '../api'
+import type { StocktakeSession, StoreSettings, UserRole, Variant } from '../api'
 import { CashStockPage } from './CashStockPage'
 import { InventoryPage } from './InventoryPage'
 
@@ -19,6 +19,7 @@ export function WarehousePage({
   onReloadOpen,
   onSetCount,
   onApplyStocktake,
+  settings = null,
 }: {
   role: UserRole | null
   variants: Variant[]
@@ -29,6 +30,7 @@ export function WarehousePage({
   onReloadOpen: () => Promise<void>
   onSetCount: (variantId: string, countedQty: number) => Promise<void>
   onApplyStocktake: () => Promise<void>
+  settings?: StoreSettings | null
 }) {
   const { t } = useTranslation()
   const [tab, setTab] = useState<HubTab>('ops')
@@ -75,7 +77,7 @@ export function WarehousePage({
       </div>
 
       {tab === 'view' ? (
-        <CashStockPage role={role} embedded />
+        <CashStockPage role={role} embedded settings={settings} />
       ) : (
         <InventoryPage
           embedded
@@ -87,6 +89,7 @@ export function WarehousePage({
           onReloadOpen={onReloadOpen}
           onSetCount={onSetCount}
           onApplyStocktake={onApplyStocktake}
+          settings={settings}
         />
       )}
     </div>

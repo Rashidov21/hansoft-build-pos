@@ -17,6 +17,18 @@ class ShopExpenseSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
-        validated_data["recorded_by"] = self.context["request"].user
+        request = self.context["request"]
+        validated_data["recorded_by"] = request.user
+        # Ochiq smena bo'lsa avtomatik bog'lash (client yubormasa ham).
+        if not validated_data.get("related_shift"):
+            from .models import Shift
+
+            open_shift = (
+                Shift.objects.filter(cashier=request.user, status=Shift.Status.OPEN)
+                .order_by("-opened_at")
+                .first()
+            )
+            if open_shift:
+                validated_data["related_shift"] = open_shift
         return super().create(validated_data)
 
