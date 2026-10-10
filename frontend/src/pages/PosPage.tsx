@@ -288,12 +288,20 @@ export function PosPage({
         name: string
         totalStock: number
         soldQty: number
+        unit: ProductUnit
       }
     >()
     const seenVariant = new Set<string>()
     for (const l of cart) {
       const key = l.productId || l.variantId
-      const current = byProduct.get(key) || { id: key, name: l.name, totalStock: 0, soldQty: 0 }
+      const unit = normalizeUnit(l.unit)
+      const current = byProduct.get(key) || {
+        id: key,
+        name: l.name,
+        totalStock: 0,
+        soldQty: 0,
+        unit,
+      }
       current.soldQty += l.qty
       if (!seenVariant.has(l.variantId)) {
         current.totalStock += Math.max(0, Number(l.stockQty ?? 0))
@@ -358,6 +366,11 @@ export function PosPage({
     const dom = (scanRef.current?.value || '').trim()
     return Boolean(buffer.trim() || dom)
   }
+
+  useEffect(() => {
+    // Prefer hidden scan buffer over product search (scanner wedge).
+    scanRef.current?.focus()
+  }, [])
 
   useEffect(() => {
     if (!completing) safeRefocus()
@@ -868,6 +881,8 @@ export function PosPage({
     try {
       const v = await fetchVariantByBarcode(c)
       setBuffer('')
+      setProductSearch('')
+      setSearchResults([])
       addVariantToCart(v)
       return
     } catch (e: unknown) {
@@ -879,6 +894,34 @@ export function PosPage({
         showToast('err', `${t('msg.scanNotFound')}: ${c}`)
       }
       setBuffer('')
+      safeRefocus()
+    }
+  }
+
+  /** Enter / scanner suffix in product search: exact barcode → cart; single result → cart. */
+  async function commitProductSearch() {
+    const q = productSearch.trim()
+    if (!q) return
+    const normalized = normalizeScanValue(q, scannerPrefix, scannerSuffix || '\t')
+    const exact = searchResults.find(
+      (v) => (v.barcode || '').trim().toLowerCase() === normalized.toLowerCase(),
+    )
+    if (exact) {
+      setProductSearch('')
+      setSearchResults([])
+      addVariantToCart(exact)
+      safeRefocus()
+      return
+    }
+    const digits = normalized.replace(/\s/g, '')
+    if (/^\d{6,}$/.test(digits)) {
+      await handleScanSubmit(digits)
+      return
+    }
+    if (searchResults.length === 1) {
+      setProductSearch('')
+      setSearchResults([])
+      addVariantToCart(searchResults[0])
       safeRefocus()
     }
   }
@@ -1538,8 +1581,10 @@ export function PosPage({
           <ul className="mt-1 list-disc list-inside text-xs opacity-95 overflow-y-auto min-h-0 kiosk-scrollbar pr-1">
             {lowStockModels.map((row) => (
               <li key={row.id}>
-                {row.name}: {formatQty(Math.max(0, row.totalStock - row.soldQty), 'kg')} {t('unit.kg')}
-                  {' '}({t('pos.afterSaleStockHint', { defaultValue: 'sotuvdan keyin' })})
+                {row.name}:{' '}
+                {formatQty(Math.max(0, row.totalStock - row.soldQty), row.unit)}{' '}
+                {t(`unit.${row.unit}`, { defaultValue: row.unit })}
+                {' '}({t('pos.afterSaleStockHint', { defaultValue: 'sotuvdan keyin' })})
               </li>
             ))}
           </ul>
@@ -1555,11 +1600,27 @@ export function PosPage({
             id="posProductSearch"
             data-pos-keep-focus="true"
             value={productSearch}
-            onChange={(e) => setProductSearch(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value
+              const suffix = scannerSuffix || '\t'
+              if (scannerMode === 'keyboard' && suffix && v.endsWith(suffix)) {
+                const code = normalizeScanValue(v, scannerPrefix, suffix)
+                setProductSearch('')
+                setSearchResults([])
+                if (code) void handleScanSubmit(code)
+                return
+              }
+              setProductSearch(v)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                void commitProductSearch()
+              }
+            }}
             className="pos-scan-field touch-btn w-full min-h-kiosk-touch text-kiosk pos-lg:text-base px-3 pos-lg:px-3 py-2 pos-lg:py-3 rounded-lg pos-lg:rounded-xl border bg-slate-900 border-slate-600 outline-none"
             placeholder={t('pos.searchPlaceholder')}
             autoComplete="off"
-            autoFocus
           />
           {searchBusy && <p className="text-xs text-slate-500">{t('admin.common.loading')}</p>}
           {productSearch.trim().length >= 2 && !searchBusy && searchResults.length === 0 && (

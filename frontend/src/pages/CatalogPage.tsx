@@ -910,6 +910,12 @@ export function CatalogPage({
                     <div className="font-medium truncate" title={name}>
                       {name}
                     </div>
+                    <div
+                      className="text-xs font-mono text-slate-500 truncate"
+                      title={(v.barcode || '').trim() || undefined}
+                    >
+                      {(v.barcode || '').trim() || t('admin.catalog.noBarcodeShort')}
+                    </div>
                     {(v.deleted_at || !v.is_active) && (
                       <div className="text-xs text-slate-500">{t('admin.catalog.honey.inactive')}</div>
                     )}

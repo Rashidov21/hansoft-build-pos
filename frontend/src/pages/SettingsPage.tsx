@@ -26,8 +26,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { BUILD_INFO } from '../generated/build-info'
 import { labelPrinterStatus, receiptPrinterStatus } from '../utils/hardwareStatus'
-import { printRawBase64 } from '../utils/tauriPrint'
-import { dispatchLabel } from '../utils/printingHub'
+import { dispatchLabel, dispatchReceipt } from '../utils/printingHub'
 import { isPrinterError, translatePrinterError } from '../utils/printerErrors'
 import { ActionToast } from '../components/ActionToast'
 import { getTauriMachineId } from '../utils/tauriMachineId'
@@ -650,8 +649,14 @@ export function SettingsPage({
                     onClick={async () => {
                       try {
                         const out = await testReceiptPrintPayload()
-                        // Settings wizard test should go to the explicitly selected printer.
-                        await printRawBase64(out.raw_base64, form.receipt_printer_name || null)
+                        const b64 = (out.raw_base64 || out.escpos_base64 || '').trim()
+                        if (!b64) throw new Error(t('err.PRINTER_RECEIPT_PAYLOAD_EMPTY'))
+                        await dispatchReceipt(b64, {
+                          receipt_printer_name: form.receipt_printer_name,
+                          receipt_printer_port: form.receipt_printer_port,
+                          label_printer_name: form.label_printer_name,
+                          label_printer_port: form.label_printer_port,
+                        })
                         setActionToast({ kind: 'ok', message: t('admin.settings.testReceiptOk') })
                       } catch (e: unknown) {
                         const rawMessage = e instanceof Error ? e.message : String(e || '')
@@ -662,7 +667,9 @@ export function SettingsPage({
                         const code = (e as Error & { code?: string }).code
                         setActionToast({
                           kind: 'err',
-                          message: t(`err.${code || 'TEST_RECEIPT_FAILED'}`),
+                          message: code
+                            ? t(`err.${code}`, { defaultValue: rawMessage || t('err.TEST_RECEIPT_FAILED') })
+                            : rawMessage || t('err.TEST_RECEIPT_FAILED'),
                         })
                       }
                     }}

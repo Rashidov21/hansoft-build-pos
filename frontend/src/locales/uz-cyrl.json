@@ -954,7 +954,7 @@
   "admin.suppliers.comingSoon": "Етказиб берувчиларни бошғариш тез орада...",
   "admin.catalog.listPriceOptional": "Сотув нархи (ихтиёрий)",
   "admin.catalog.barcodeOptional": "Барcоде (ихтиёрий)",
-  "admin.catalog.barcodeScanHint": "Сканер билан ўқинг ёки қўлда ёзинг. Бўш қолдирилса — барcоде сиз яратилади.",
+  "admin.catalog.barcodeScanHint": "Сканер билан ўқинг ёки қўлда ёзинг. Бўш қолдирилса — автоматик барcоде яратилади.",
   "admin.catalog.barcodeAlreadyUsed": "Бу барcоде банд: {{code}}",
   "admin.suppliers.name": "Номи",
   "admin.suppliers.email": "Емаил",

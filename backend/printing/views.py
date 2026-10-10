@@ -224,6 +224,8 @@ class LabelEscposView(APIView):
                 },
                 settings=settings,
             )
+        except ValueError as exc:
+            return Response({"code": "LABEL_BARCODE_REQUIRED", "detail": str(exc)}, status=400)
         except (FileNotFoundError, OSError) as exc:
             return _escpos_bundle_error_response(exc)
         return Response(
@@ -267,6 +269,8 @@ class LabelQueueEscposView(APIView):
                     label_payload={"variant": v, "size": size, "copies": item["copies"], "show_price": show_price},
                     settings=settings,
                 )
+            except ValueError as exc:
+                return Response({"code": "LABEL_BARCODE_REQUIRED", "detail": str(exc)}, status=400)
             except (FileNotFoundError, OSError) as exc:
                 return _escpos_bundle_error_response(exc)
             out.append(
@@ -293,16 +297,21 @@ class TestReceiptPrintView(APIView):
     def post(self, request):
         import base64
 
+        from django.utils import timezone as dj_tz
+
         settings = StoreSettings.get_solo()
         test_lang = resolve_receipt_store_lang(settings, request.headers.get("Accept-Language") or "uz")
+        now_display = dj_tz.localtime().strftime("%Y-%m-%d %H:%M")
+        # Sample amounts so hardware test shows layout/totals (not zeros).
         dto = {
             "sale_id": "TEST-RECEIPT",
-            "completed_at": "",
-            "cashier": "admin",
-            "subtotal": "0",
-            "discount_total": "0",
-            "grand_total": "0",
-            "payments": [{"method": "CASH", "amount": "0"}],
+            "public_sale_no": "T-000001",
+            "completed_at": now_display,
+            "cashier": getattr(request.user, "username", None) or "admin",
+            "subtotal": "45000",
+            "discount_total": "5000",
+            "grand_total": "40000",
+            "payments": [{"method": "CASH", "amount": "40000"}],
             "store": {
                 "brand_name": settings.brand_name,
                 "phone": settings.phone,
@@ -312,12 +321,28 @@ class TestReceiptPrintView(APIView):
                 "encoding": settings.encoding,
                 "lang": test_lang,
                 "receipt_width": settings.receipt_width or "58mm",
+                "receipt_font_size": int(getattr(settings, "receipt_font_size", 0) or 0),
                 "receipt_printer_name": settings.receipt_printer_name or "",
                 "receipt_printer_type": settings.receipt_printer_type,
                 "label_printer_name": settings.label_printer_name or "",
                 "label_printer_type": settings.label_printer_type,
             },
-            "lines": [],
+            "lines": [
+                {
+                    "name": "Demo tovar / Тест",
+                    "barcode": "20000001",
+                    "qty": "2",
+                    "unit": "20000",
+                    "total": "40000",
+                },
+                {
+                    "name": "Armatura 12 mm",
+                    "barcode": "20000002",
+                    "qty": "1",
+                    "unit": "5000",
+                    "total": "5000",
+                },
+            ],
         }
         try:
             raw = PrinterFactory.render_receipt(receipt_dto=dto, settings=settings)

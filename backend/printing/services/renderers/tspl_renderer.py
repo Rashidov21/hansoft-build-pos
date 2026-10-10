@@ -70,7 +70,8 @@ def _tspl_layout_centered(
     if tiny:
         margin = 2
         gap_small = 4
-        gap_after_bc = 14
+        # Extra space under bars so price does not sit on CODE128 HRI digits.
+        gap_after_bc = 22
         # Name rarely fits; caller may still pass has_name — keep ultra-small.
     elif compact:
         margin = 4
@@ -117,7 +118,8 @@ def _tspl_layout_centered(
     # TSPL BARCODE height is in dots; cap so tiny labels still print
     bc_h = min(bc_h, 220)
     if tiny:
-        bc_h = min(bc_h, 72)
+        # Leave room for price line under barcode on 30×20.
+        bc_h = min(bc_h, 56 if has_price else 72)
     elif compact:
         bc_h = min(bc_h, 100)
 
@@ -209,7 +211,9 @@ class TsplRenderer:
             variant, settings, label_payload.get("show_price")
         )
 
-        barcode = (variant.barcode or "").strip() or "0"
+        barcode = (variant.barcode or "").strip()
+        if not barcode:
+            raise ValueError("Label barcode is required")
         store_lang = resolve_receipt_store_lang(settings, None)
         raw_custom = _label_custom_name(variant.product, store_lang)
         # XP-365B built-in TEXT is ASCII-only: always transliterate Cyrillic
@@ -225,6 +229,9 @@ class TsplRenderer:
 
         has_name = bool(custom and custom != "-")
         has_price = bool(print_price and price)
+        tiny = size_key.strip().lower() == "30x20"
+        # On micro labels with price, hide printer HRI digits — price TEXT is the readable line.
+        hri = 0 if (tiny and has_price) else 1
 
         w_mm, h_mm = _tspl_dimensions_mm(size_key)
         lay = _tspl_layout_centered(
@@ -247,13 +254,10 @@ class TsplRenderer:
             (w_dots - _text_width_dots(price, char_dots=lay["price_char"])) // 2,
         ) if print_price and price else 0
 
-        # Store gap (mm); micro labels default tighter if store still on 2.0.
         try:
             gap_mm = float(getattr(settings, "label_gap_mm", 2) or 2)
         except (TypeError, ValueError):
             gap_mm = 2.0
-        if size_key.strip().lower() == "30x20" and abs(gap_mm - 2.0) < 0.05:
-            gap_mm = 1.5
         gap_mm = max(0.5, min(20.0, gap_mm))
         try:
             direction = int(getattr(settings, "label_direction", 1) or 1)
@@ -275,7 +279,7 @@ class TsplRenderer:
                     f'TEXT {x_custom},{lay["y_sc"]},"{lay["sc_font"]}",0,{lay["sc_xmul"]},{lay["sc_ymul"]},"{custom}"'
                 )
             block.append(
-                f'BARCODE {lay["x_bc"]},{lay["y_bc"]},"128",{lay["bc_h"]},1,0,{lay["nar"]},{lay["wide"]},"{barcode}"'
+                f'BARCODE {lay["x_bc"]},{lay["y_bc"]},"128",{lay["bc_h"]},{hri},0,{lay["nar"]},{lay["wide"]},"{barcode}"'
             )
             # Price under barcode (centered) - only if show_price is True
             if print_price and price:

@@ -61,7 +61,7 @@ class StoreSettings(models.Model):
         choices=LabelSize.choices,
         default=LabelSize.S_40X30,
     )
-    # TSPL GAP between labels (mm). Compact 30×20 uses 1.5 when this stays at default 2.
+    # TSPL GAP between labels (mm) — sent as-is to the printer.
     label_gap_mm = models.DecimalField(
         max_digits=4,
         decimal_places=1,

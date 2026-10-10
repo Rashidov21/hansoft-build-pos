@@ -874,7 +874,7 @@
   "admin.suppliers.backendReady": "Backend API готов. Frontend UI будет добавлен в следующем обновлении.",
   "admin.catalog.listPriceOptional": "Цена продажи (необязательно)",
   "admin.catalog.barcodeOptional": "Штрих-код (необязательно)",
-  "admin.catalog.barcodeScanHint": "Отсканируйте или введите вручную. Можно оставить пустым.",
+  "admin.catalog.barcodeScanHint": "Отсканируйте или введите вручную. Если пусто — штрих-код создаётся автоматически.",
   "admin.catalog.barcodeAlreadyUsed": "Этот штрих-код уже занят: {{code}}",
   "admin.catalog.salePricePlaceholder": "Например: 150000",
   "admin.common.search": "Поиск...",

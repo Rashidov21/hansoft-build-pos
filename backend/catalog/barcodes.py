@@ -25,11 +25,14 @@ def _next_numeric_barcode() -> str:
 
 
 def allocate_unique_barcode(variant, max_attempts: int = 20) -> str:
+    """Assign a unique numeric barcode to variant and persist it."""
     from catalog.models import ProductVariant
 
     for _ in range(max_attempts):
         candidate = _next_numeric_barcode()
         exists = ProductVariant.objects.exclude(pk=variant.pk).filter(barcode=candidate).exists()
         if not exists:
+            variant.barcode = candidate
+            variant.save(update_fields=["barcode"])
             return candidate
     raise RuntimeError("Could not allocate unique numeric barcode")

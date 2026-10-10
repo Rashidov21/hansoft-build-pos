@@ -894,7 +894,7 @@
   "admin.suppliers.backendReady": "Backend API tayyor. Frontend UI keyingi yangilanishda qo'shiladi.",
   "admin.catalog.listPriceOptional": "Sotuv narxi (ixtiyoriy)",
   "admin.catalog.barcodeOptional": "Barcode (ixtiyoriy)",
-  "admin.catalog.barcodeScanHint": "Skaner bilan o‘qing yoki qo‘lda yozing. Bo‘sh qoldirilsa — barcode siz yaratiladi.",
+  "admin.catalog.barcodeScanHint": "Skaner bilan o‘qing yoki qo‘lda yozing. Bo‘sh qoldirilsa — avtomatik barcode yaratiladi.",
   "admin.catalog.barcodeAlreadyUsed": "Bu barcode band: {{code}}",
   "admin.suppliers.add": "Ta'minotchi qo'shish",
   "admin.suppliers.edit": "Ta'minotchini tahrirlash",

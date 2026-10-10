@@ -545,8 +545,6 @@ def nakladnoy_plain_text(dto: dict) -> str:
     for row in _wrap_text(t(labels["hint"]), width):
         buf.append(row)
     buf.append("")
-    buf.append("--- CUT HERE ---")
-    buf.append("")
     return "\n".join(buf)
 
 
@@ -628,8 +626,6 @@ def receipt_plain_text(receipt: dict) -> str:
     if footer:
         buf.append(footer)
     buf.append("")
-    buf.append("--- CUT HERE ---")
-    buf.append("")
     return "\n".join(buf)
 
 
@@ -668,7 +664,12 @@ def _load_logo_bw(settings: StoreSettings):
 def _load_receipt_font(size: int):
     from PIL import ImageFont
 
+    # Prefer monospace so _line_80mm space-padding aligns as one right column.
     candidates = [
+        r"C:\Windows\Fonts\consola.ttf",
+        r"C:\Windows\Fonts\cour.ttf",
+        r"C:\Windows\Fonts\lucon.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
         r"C:\Windows\Fonts\arial.ttf",
         r"C:\Windows\Fonts\calibri.ttf",
         r"C:\Windows\Fonts\tahoma.ttf",

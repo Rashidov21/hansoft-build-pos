@@ -23,7 +23,7 @@ use std::os::windows::ffi::OsStrExt;
 use windows_sys::Win32::Foundation::{GetLastError, ERROR_INSUFFICIENT_BUFFER};
 #[cfg(windows)]
 use windows_sys::Win32::Graphics::Printing::{
-    ClosePrinter, EndDocPrinter, EndPagePrinter, EnumPrintersW, GetDefaultPrinterW, OpenPrinterW,
+    ClosePrinter, EndDocPrinter, EndPagePrinter, EnumPrintersW, OpenPrinterW,
     StartDocPrinterW, StartPagePrinter, WritePrinter, DOC_INFO_1W, PRINTER_INFO_4W,
     PRINTER_ACCESS_USE, PRINTER_DEFAULTSW,
 };
@@ -1160,25 +1160,6 @@ fn stop_backend(state: &BackendState) {
     }
 }
 
-#[cfg(windows)]
-fn default_printer_name() -> Result<String, String> {
-    let mut needed: u32 = 0;
-    unsafe {
-        let _ = GetDefaultPrinterW(std::ptr::null_mut(), &mut needed as *mut u32);
-    }
-    if needed == 0 {
-        return Err("Default printer not found".to_string());
-    }
-
-    let mut buf: Vec<u16> = vec![0; needed as usize + 1];
-    let ok = unsafe { GetDefaultPrinterW(buf.as_mut_ptr(), &mut needed as *mut u32) };
-    if ok == 0 {
-        return Err("GetDefaultPrinterW failed".to_string());
-    }
-    let end = buf.iter().position(|x| *x == 0).unwrap_or(buf.len());
-    String::from_utf16(&buf[..end]).map_err(|e| e.to_string())
-}
-
 /// ESC/POS RAW via Win32 **Unicode** printer APIs (OpenPrinterW).
 /// `raw-printer` 0.1.x uses OpenPrinterA + CString, which breaks non‑ASCII queue names (Cyrillic, etc.).
 #[cfg(windows)]
@@ -1255,10 +1236,11 @@ fn raw_print_win_wide(printer: &str, payload: &[u8], document_name: &str) -> Res
 
 #[cfg(windows)]
 fn raw_print_to(printer_name: Option<&str>, bytes: &[u8], doc_name: &str) -> Result<(), String> {
-    let name = match printer_name.map(str::trim).filter(|s| !s.is_empty()) {
-        Some(s) => s.to_string(),
-        None => default_printer_name()?,
-    };
+    let name = printer_name
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "Printer name required — refusing Windows default".to_string())?
+        .to_string();
     let written = raw_print_win_wide(&name, bytes, doc_name)?;
     if written == 0 {
         return Err("RAW print wrote zero bytes".to_string());
@@ -1368,24 +1350,26 @@ fn print_plain(text: String) -> Result<String, String> {
 
 #[tauri::command]
 fn print_raw(payload: String, printer_name: Option<String>) -> Result<String, String> {
-    let bytes: Vec<u8> = B64
-        .decode(payload.trim())
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .filter(|&b| b != 0x07)
-        .collect();
+    // Intact binary after base64 decode — do not strip bytes (0x07 appears in ESC/POS raster).
+    let bytes: Vec<u8> = B64.decode(payload.trim()).map_err(|e| e.to_string())?;
 
     #[cfg(windows)]
     {
         let _guard = RAW_PRINT_MUTEX
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let target = printer_name.as_deref().map(str::trim).filter(|s| !s.is_empty());
-        raw_print_to(target, &bytes, "Hansoft POS RAW")?;
+        let target = printer_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                "Printer name required — refusing Windows default (set receipt/label printer in Settings)"
+                    .to_string()
+            })?;
+        raw_print_to(Some(target), &bytes, "Hansoft POS RAW")?;
         // Brief pause so the USB driver can release the endpoint before the next RAW job (e.g. receipt → label).
         thread::sleep(Duration::from_millis(50));
-        let label = target.unwrap_or("(default Windows printer)");
-        return Ok(format!("Queued to {label}"));
+        return Ok(format!("Queued to {target}"));
     }
 
     #[allow(unreachable_code)]

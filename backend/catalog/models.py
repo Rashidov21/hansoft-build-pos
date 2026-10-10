@@ -137,7 +137,7 @@ class ProductVariant(models.Model):
     def save(self, *args, **kwargs):
         if self.pk is None:
             self.pk = uuid.uuid4()
-        # Honey shop: barcode optional; do not auto-allocate.
+        # Blank barcode → None; bulk create may auto-allocate a unique code after save.
         if self.barcode is not None and not str(self.barcode).strip():
             self.barcode = None
         super().save(*args, **kwargs)

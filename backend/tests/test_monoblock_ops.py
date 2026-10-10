@@ -23,7 +23,9 @@ def _mk_variant(stock_qty: int = 10) -> ProductVariant:
         product=prod,
         purchase_price=Decimal("100000.00"),
         list_price=Decimal("150000.00"),
-        stock_qty=stock_qty)
+        stock_qty=stock_qty,
+        barcode=f"BC{uuid.uuid4().hex[:10].upper()}",
+    )
 
 
 @pytest.mark.django_db
@@ -293,6 +295,6 @@ def test_tspl_label_size_matches_request(client):
     assert r30.status_code == 200
     raw30 = base64.b64decode(r30.json()["raw_base64"]).decode("ascii", errors="ignore")
     assert "SIZE 30 mm,20 mm" in raw30
-    assert "GAP 1.5 mm,0 mm" in raw30
+    assert "GAP 2 mm,0 mm" in raw30 or "GAP 2.0 mm,0 mm" in raw30
     assert "BARCODE" in raw30
 

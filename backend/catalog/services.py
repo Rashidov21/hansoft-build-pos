@@ -6,6 +6,7 @@ from django.db import transaction
 from core.qty import UNIT_DONA, normalize_unit, parse_qty, validate_stock_qty
 from inventory.models import InventoryMovement
 from inventory.services import apply_movement
+from .barcodes import allocate_unique_barcode
 from .models import Product, ProductVariant
 
 
@@ -18,12 +19,12 @@ def bulk_create_variant_grid(
     """
     Create SKUs for catalog.
     matrix items: purchase_price, list_price (optional), initial_qty, barcode,
-    unit (optional, default dona).
+    unit (optional, default dona). Empty barcode → auto-allocate unique numeric code.
     """
     created: list[ProductVariant] = []
     for cell in matrix:
         qty = parse_qty(cell.get("initial_qty") or 0)
-        barcode = cell.get("barcode") or None
+        barcode = (cell.get("barcode") or "").strip() or None
         unit = normalize_unit(cell.get("unit") or UNIT_DONA)
         validate_stock_qty(qty, unit)
 
@@ -46,6 +47,8 @@ def bulk_create_variant_grid(
             unit=unit,
         )
         v.save()
+        if not v.barcode:
+            allocate_unique_barcode(v)
         if qty > 0:
             apply_movement(
                 variant=v,
