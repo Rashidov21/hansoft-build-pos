@@ -213,3 +213,74 @@ def test_tspl_label_transliterates_cyrillic_name():
     # Must not be empty placeholder only
     assert 'TEXT' in raw
     assert "Арматура" not in raw  # raw stream is ASCII
+
+
+def test_tspl_size_profiles_keep_stack_inside_label():
+    from printing.services.renderers.tspl_renderer import _tspl_layout_from_profile
+
+    for size in ("30x20", "40x30", "40x50", "50x40", "58mm"):
+        for has_price in (True, False):
+            lay = _tspl_layout_from_profile(
+                size_key=size,
+                barcode="20000001",
+                has_name=True,
+                has_price=has_price,
+            )
+            h = lay["h_dots"]
+            assert lay["y_bc"] >= lay["margin"]
+            assert lay["y_bc"] + lay["bc_h"] <= h - lay["margin"] + 2
+            if has_price:
+                assert lay["y_price"] >= lay["y_bc"] + lay["bc_h"]
+                assert lay["y_price"] < h
+            if lay["use_name"]:
+                assert lay["y_sc"] < lay["y_bc"]
+            assert lay["name_max"] >= 4
+            assert lay["bc_h"] >= 24
+
+
+@pytest.mark.django_db
+def test_tspl_30x20_with_price_hides_hri_and_keeps_price_below_barcode():
+    settings = StoreSettings.get_solo()
+    settings.label_printer_type = "TSPL"
+    settings.save(update_fields=["label_printer_type"])
+    variant = _mk_variant(name_uz="Asman red", custom_uz="")
+    raw = PrinterFactory.render_label(
+        label_payload={"variant": variant, "size": "30x20", "copies": 1, "show_price": True},
+        settings=settings,
+    ).decode("ascii", errors="ignore")
+    assert "SIZE 30 mm,20 mm" in raw
+    # BARCODE ...,hri,... — hri must be 0 when price is on (micro label).
+    import re
+
+    m = re.search(r'BARCODE\s+\d+,\d+,"128",(\d+),(\d+),', raw)
+    assert m is not None
+    bc_h, hri = int(m.group(1)), int(m.group(2))
+    assert hri == 0
+    assert bc_h <= 56
+    assert "150000" in raw.replace(" ", "") or "150 000" in raw
+    # Price TEXT y > barcode y
+    bc_y = int(re.search(r'BARCODE\s+\d+,(\d+),', raw).group(1))
+    price_ys = [int(x) for x in re.findall(r'TEXT\s+\d+,(\d+),', raw)]
+    assert price_ys
+    assert max(price_ys) > bc_y
+
+
+@pytest.mark.django_db
+def test_tspl_40x50_uses_taller_barcode_than_40x30():
+    settings = StoreSettings.get_solo()
+    settings.label_printer_type = "TSPL"
+    settings.save(update_fields=["label_printer_type"])
+    variant = _mk_variant()
+    import re
+
+    def bc_h(size: str) -> int:
+        raw = PrinterFactory.render_label(
+            label_payload={"variant": variant, "size": size, "copies": 1, "show_price": True},
+            settings=settings,
+        ).decode("ascii", errors="ignore")
+        m = re.search(r'BARCODE\s+\d+,\d+,"128",(\d+),', raw)
+        assert m
+        return int(m.group(1))
+
+    assert bc_h("40x50") > bc_h("40x30")
+    assert bc_h("40x30") > bc_h("30x20")
